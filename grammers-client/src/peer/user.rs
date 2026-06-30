@@ -118,11 +118,7 @@ impl User {
     pub async fn to_ref(
         &self,
     ) -> Result<Option<PeerRef>, Box<dyn std::error::Error + Send + Sync>> {
-        let id = self.id();
-        match self.auth() {
-            Some(auth) => Ok(Some(PeerRef { id, auth })),
-            None => self.client.0.session.peer_ref(id).await,
-        }
+        super::to_ref(&self.client, self.id(), self.auth()).await
     }
 
     /// Return the first name of this user.

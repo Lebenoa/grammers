@@ -14,6 +14,11 @@ use grammers_session::types::{DcOption, PeerId, PeerInfo, PeerRef, UpdateState, 
 
 use crate::errors::InvocationError;
 
+/// Erase a session storage error into an [`InvocationError::Session`].
+fn erase<E: Any + Send + Sync>(e: E) -> InvocationError {
+    InvocationError::Session(Box::new(e) as Box<dyn Any + Send + Sync>)
+}
+
 pub trait ErasedSession: Send + Sync {
     fn home_dc_id(&self) -> Result<i32, InvocationError>;
 
@@ -37,20 +42,20 @@ pub trait ErasedSession: Send + Sync {
 impl<T: Session> ErasedSession for T {
     fn home_dc_id(&self) -> Result<i32, InvocationError> {
         self.home_dc_id()
-            .map_err(|e| InvocationError::Session(Box::new(e) as Box<dyn Any + Send + Sync>))
+            .map_err(erase)
     }
 
     fn set_home_dc_id(&self, dc_id: i32) -> BoxFuture<'_, Result<(), InvocationError>> {
         Box::pin(async move {
             self.set_home_dc_id(dc_id)
                 .await
-                .map_err(|e| InvocationError::Session(Box::new(e) as Box<dyn Any + Send + Sync>))
+                .map_err(erase)
         })
     }
 
     fn dc_option(&self, dc_id: i32) -> Result<Option<DcOption>, InvocationError> {
         self.dc_option(dc_id)
-            .map_err(|e| InvocationError::Session(Box::new(e) as Box<dyn Any + Send + Sync>))
+            .map_err(erase)
     }
 
     fn set_dc_option(&self, dc_option: &DcOption) -> BoxFuture<'_, Result<(), InvocationError>> {
@@ -58,7 +63,7 @@ impl<T: Session> ErasedSession for T {
         Box::pin(async move {
             self.set_dc_option(&dc_option)
                 .await
-                .map_err(|e| InvocationError::Session(Box::new(e) as Box<dyn Any + Send + Sync>))
+                .map_err(erase)
         })
     }
 
@@ -66,7 +71,7 @@ impl<T: Session> ErasedSession for T {
         Box::pin(async move {
             self.peer(peer)
                 .await
-                .map_err(|e| InvocationError::Session(Box::new(e) as Box<dyn Any + Send + Sync>))
+                .map_err(erase)
         })
     }
 
@@ -74,7 +79,7 @@ impl<T: Session> ErasedSession for T {
         Box::pin(async move {
             self.peer_ref(peer)
                 .await
-                .map_err(|e| InvocationError::Session(Box::new(e) as Box<dyn Any + Send + Sync>))
+                .map_err(erase)
         })
     }
 
@@ -83,7 +88,7 @@ impl<T: Session> ErasedSession for T {
         Box::pin(async move {
             self.cache_peer(&peer)
                 .await
-                .map_err(|e| InvocationError::Session(Box::new(e) as Box<dyn Any + Send + Sync>))
+                .map_err(erase)
         })
     }
 
@@ -91,7 +96,7 @@ impl<T: Session> ErasedSession for T {
         Box::pin(async {
             self.updates_state()
                 .await
-                .map_err(|e| InvocationError::Session(Box::new(e) as Box<dyn Any + Send + Sync>))
+                .map_err(erase)
         })
     }
 
@@ -99,7 +104,7 @@ impl<T: Session> ErasedSession for T {
         Box::pin(async {
             self.set_update_state(update)
                 .await
-                .map_err(|e| InvocationError::Session(Box::new(e) as Box<dyn Any + Send + Sync>))
+                .map_err(erase)
         })
     }
 }

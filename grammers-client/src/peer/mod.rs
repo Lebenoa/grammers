@@ -36,6 +36,19 @@ pub use user::{Platform, RestrictionReason, User};
 
 use crate::{Client, media::ChatPhoto};
 
+/// Resolve a peer to its [`PeerRef`], using the cached `auth` if present or
+/// falling back to the session cache. Shared by `Channel`, `Group` and `User`.
+pub(crate) async fn to_ref(
+    client: &Client,
+    id: PeerId,
+    auth: Option<PeerAuth>,
+) -> Result<Option<PeerRef>, Box<dyn std::error::Error + Send + Sync>> {
+    match auth {
+        Some(auth) => Ok(Some(PeerRef { id, auth })),
+        None => client.0.session.peer_ref(id).await,
+    }
+}
+
 /// A user, group, or broadcast channel.
 ///
 /// Peers represent places where you can initiate a message exchange with others.
@@ -174,35 +187,20 @@ impl Peer {
             None => return Ok(None),
             Some(x) => x.into(),
         };
-        Ok(match self {
-            Self::User(user) => user.photo().map(|x| ChatPhoto {
-                raw: tl::enums::InputFileLocation::InputPeerPhotoFileLocation(
-                    tl::types::InputPeerPhotoFileLocation {
-                        big,
-                        peer,
-                        photo_id: x.photo_id,
-                    },
-                ),
-            }),
-            Self::Group(group) => group.photo().map(|x| ChatPhoto {
-                raw: tl::enums::InputFileLocation::InputPeerPhotoFileLocation(
-                    tl::types::InputPeerPhotoFileLocation {
-                        big,
-                        peer,
-                        photo_id: x.photo_id,
-                    },
-                ),
-            }),
-            Self::Channel(channel) => channel.photo().map(|x| ChatPhoto {
-                raw: tl::enums::InputFileLocation::InputPeerPhotoFileLocation(
-                    tl::types::InputPeerPhotoFileLocation {
-                        big,
-                        peer,
-                        photo_id: x.photo_id,
-                    },
-                ),
-            }),
-        })
+        let photo_id = match self {
+            Self::User(user) => user.photo().map(|x| x.photo_id),
+            Self::Group(group) => group.photo().map(|x| x.photo_id),
+            Self::Channel(channel) => channel.photo().map(|x| x.photo_id),
+        };
+        Ok(photo_id.map(|photo_id| ChatPhoto {
+            raw: tl::enums::InputFileLocation::InputPeerPhotoFileLocation(
+                tl::types::InputPeerPhotoFileLocation {
+                    big,
+                    peer,
+                    photo_id,
+                },
+            ),
+        }))
     }
 }
 

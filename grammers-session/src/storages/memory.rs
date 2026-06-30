@@ -7,7 +7,7 @@
 // except according to those terms.
 
 use std::fmt;
-use std::sync::Mutex;
+use std::sync::{Mutex, MutexGuard};
 
 use crate::types::{ChannelState, DcOption, PeerId, PeerInfo, UpdateState, UpdatesState};
 use crate::{BoxFuture, Session, SessionData};
@@ -45,43 +45,35 @@ impl fmt::Display for MemorySessionError {
     }
 }
 
+impl MemorySession {
+    /// Lock the session data, mapping a poisoned mutex into [`MemorySessionError`].
+    fn data(&self) -> Result<MutexGuard<'_, SessionData>, MemorySessionError> {
+        self.0.lock().map_err(|_| MemorySessionError::Poisoned)
+    }
+}
+
 impl Session for MemorySession {
     type Error = MemorySessionError;
 
     fn home_dc_id(&self) -> Result<i32, MemorySessionError> {
-        Ok(self
-            .0
-            .lock()
-            .map_err(|_| MemorySessionError::Poisoned)?
-            .home_dc)
+        Ok(self.data()?.home_dc)
     }
 
     fn set_home_dc_id(&self, dc_id: i32) -> BoxFuture<'_, Result<(), MemorySessionError>> {
         Box::pin(async move {
-            self.0
-                .lock()
-                .map_err(|_| MemorySessionError::Poisoned)?
-                .home_dc = dc_id;
+            self.data()?.home_dc = dc_id;
             Ok(())
         })
     }
 
     fn dc_option(&self, dc_id: i32) -> Result<Option<DcOption>, MemorySessionError> {
-        Ok(self
-            .0
-            .lock()
-            .map_err(|_| MemorySessionError::Poisoned)?
-            .dc_options
-            .get(&dc_id)
-            .cloned())
+        Ok(self.data()?.dc_options.get(&dc_id).cloned())
     }
 
     fn set_dc_option(&self, dc_option: &DcOption) -> BoxFuture<'_, Result<(), MemorySessionError>> {
         let dc_option = dc_option.clone();
         Box::pin(async move {
-            self.0
-                .lock()
-                .map_err(|_| MemorySessionError::Poisoned)?
+            self.data()?
                 .dc_options
                 .insert(dc_option.id, dc_option.clone());
             Ok(())
@@ -89,23 +81,13 @@ impl Session for MemorySession {
     }
 
     fn peer(&self, peer: PeerId) -> BoxFuture<'_, Result<Option<PeerInfo>, MemorySessionError>> {
-        Box::pin(async move {
-            Ok(self
-                .0
-                .lock()
-                .map_err(|_| MemorySessionError::Poisoned)?
-                .peer_infos
-                .get(&peer)
-                .cloned())
-        })
+        Box::pin(async move { Ok(self.data()?.peer_infos.get(&peer).cloned()) })
     }
 
     fn cache_peer(&self, peer: &PeerInfo) -> BoxFuture<'_, Result<(), MemorySessionError>> {
         let peer = peer.clone();
         Box::pin(async move {
-            self.0
-                .lock()
-                .map_err(|_| MemorySessionError::Poisoned)?
+            self.data()?
                 .peer_infos
                 .entry(peer.id())
                 .or_insert_with(|| peer.clone())
@@ -115,14 +97,7 @@ impl Session for MemorySession {
     }
 
     fn updates_state(&self) -> BoxFuture<'_, Result<UpdatesState, MemorySessionError>> {
-        Box::pin(async move {
-            Ok(self
-                .0
-                .lock()
-                .map_err(|_| MemorySessionError::Poisoned)?
-                .updates_state
-                .clone())
-        })
+        Box::pin(async move { Ok(self.data()?.updates_state.clone()) })
     }
 
     fn set_update_state(
@@ -130,7 +105,7 @@ impl Session for MemorySession {
         update: UpdateState,
     ) -> BoxFuture<'_, Result<(), MemorySessionError>> {
         Box::pin(async move {
-            let mut data = self.0.lock().map_err(|_| MemorySessionError::Poisoned)?;
+            let mut data = self.data()?;
 
             match update {
                 UpdateState::All(updates_state) => {

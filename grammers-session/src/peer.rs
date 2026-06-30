@@ -735,12 +735,25 @@ impl<'a> From<&'a PeerId> for tl::enums::Peer {
     }
 }
 
-impl From<PeerRef> for tl::enums::InputPeer {
-    #[inline]
-    fn from(peer: PeerRef) -> Self {
-        <Self as From<&PeerRef>>::from(&peer)
-    }
+/// Generate owned `From<PeerRef>` impls that forward to the `From<&PeerRef>` impl.
+macro_rules! forward_peer_ref_from {
+    ($($ty:ty),+ $(,)?) => {$(
+        impl From<PeerRef> for $ty {
+            #[inline]
+            fn from(peer: PeerRef) -> Self {
+                <Self as From<&PeerRef>>::from(&peer)
+            }
+        }
+    )+};
 }
+
+forward_peer_ref_from!(
+    tl::enums::InputPeer,
+    tl::enums::InputUser,
+    i64,
+    tl::enums::InputChannel,
+);
+
 impl<'a> From<&'a PeerRef> for tl::enums::InputPeer {
     fn from(peer: &'a PeerRef) -> Self {
         match peer.id.kind() {
@@ -762,12 +775,6 @@ impl<'a> From<&'a PeerRef> for tl::enums::InputPeer {
     }
 }
 
-impl From<PeerRef> for tl::enums::InputUser {
-    #[inline]
-    fn from(peer: PeerRef) -> Self {
-        <Self as From<&PeerRef>>::from(&peer)
-    }
-}
 impl<'a> From<&'a PeerRef> for tl::enums::InputUser {
     fn from(peer: &'a PeerRef) -> Self {
         match peer.id.kind() {
@@ -784,12 +791,6 @@ impl<'a> From<&'a PeerRef> for tl::enums::InputUser {
     }
 }
 
-impl From<PeerRef> for i64 {
-    #[inline]
-    fn from(peer: PeerRef) -> Self {
-        <Self as From<&PeerRef>>::from(&peer)
-    }
-}
 impl<'a> From<&'a PeerRef> for i64 {
     fn from(peer: &'a PeerRef) -> Self {
         match peer.id.kind() {
@@ -800,12 +801,6 @@ impl<'a> From<&'a PeerRef> for i64 {
     }
 }
 
-impl From<PeerRef> for tl::enums::InputChannel {
-    #[inline]
-    fn from(peer: PeerRef) -> Self {
-        <Self as From<&PeerRef>>::from(&peer)
-    }
-}
 impl<'a> From<&'a PeerRef> for tl::enums::InputChannel {
     fn from(peer: &'a PeerRef) -> Self {
         match peer.id.kind() {

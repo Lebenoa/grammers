@@ -233,11 +233,7 @@ impl Client {
     #[cfg(feature = "fs")]
     async fn load<P: AsRef<Path>>(path: P, download: &mut DownloadIter) -> Result<(), io::Error> {
         let mut file = fs::File::create(path).await?;
-        while let Some(chunk) = download
-            .next()
-            .await
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?
-        {
+        while let Some(chunk) = download.next().await.map_err(io::Error::other)? {
             file.write_all(&chunk).await?;
         }
 
@@ -345,9 +341,7 @@ impl Client {
 
         // Check if all tasks finished succesfully
         for task in tasks {
-            let res = task
-                .await
-                .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+            let res = task.await.map_err(io::Error::other)?;
             res?;
         }
         Ok(())
@@ -424,7 +418,7 @@ impl Client {
                                 bytes,
                             })
                             .await
-                            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+                            .map_err(io::Error::other)?;
 
                         if !ok {
                             return Err(io::Error::new(
@@ -461,7 +455,7 @@ impl Client {
                         bytes,
                     })
                     .await
-                    .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+                    .map_err(io::Error::other)?;
 
                 if !ok {
                     return Err(io::Error::new(

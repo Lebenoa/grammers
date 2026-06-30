@@ -130,6 +130,44 @@ pub(crate) async fn parse_mention_entities(
 
 const MAX_LIMIT: usize = 100;
 
+/// Build a reply-to a plain message by its ID, leaving all other fields unset.
+fn input_reply_to(reply_to_msg_id: i32) -> tl::enums::InputReplyTo {
+    tl::types::InputReplyToMessage {
+        reply_to_msg_id,
+        top_msg_id: None,
+        reply_to_peer_id: None,
+        quote_text: None,
+        quote_entities: None,
+        quote_offset: None,
+        monoforum_peer_id: None,
+        todo_item_id: None,
+        poll_option: None,
+    }
+    .into()
+}
+
+/// Flatten a `messages.Messages` response into its messages, users and chats.
+///
+/// Panics on `NotModified`, which is only returned when a non-zero `hash` was sent.
+fn unpack_messages(
+    res: tl::enums::messages::Messages,
+) -> (
+    Vec<tl::enums::Message>,
+    Vec<tl::enums::User>,
+    Vec<tl::enums::Chat>,
+) {
+    use tl::enums::messages::Messages;
+
+    match res {
+        Messages::Messages(m) => (m.messages, m.users, m.chats),
+        Messages::Slice(m) => (m.messages, m.users, m.chats),
+        Messages::ChannelMessages(m) => (m.messages, m.users, m.chats),
+        Messages::NotModified(_) => {
+            panic!("API returned Messages::NotModified even though GetMessages was used")
+        }
+    }
+}
+
 impl<R: tl::RemoteCall<Return = tl::enums::messages::Messages>> IterBuffer<R, Message> {
     /// Fetches the total unless cached.
     ///
@@ -567,20 +605,7 @@ impl Client {
                 background: message.background,
                 clear_draft: message.clear_draft,
                 peer: peer.into(),
-                reply_to: message.reply_to.map(|reply_to_msg_id| {
-                    tl::types::InputReplyToMessage {
-                        reply_to_msg_id,
-                        top_msg_id: None,
-                        reply_to_peer_id: None,
-                        quote_text: None,
-                        quote_entities: None,
-                        quote_offset: None,
-                        monoforum_peer_id: None,
-                        todo_item_id: None,
-                        poll_option: None,
-                    }
-                    .into()
-                }),
+                reply_to: message.reply_to.map(input_reply_to),
                 media,
                 message: message.text.clone(),
                 random_id,
@@ -606,20 +631,7 @@ impl Client {
                 background: message.background,
                 clear_draft: message.clear_draft,
                 peer: peer.into(),
-                reply_to: message.reply_to.map(|reply_to_msg_id| {
-                    tl::types::InputReplyToMessage {
-                        reply_to_msg_id,
-                        top_msg_id: None,
-                        reply_to_peer_id: None,
-                        quote_text: None,
-                        quote_entities: None,
-                        quote_offset: None,
-                        monoforum_peer_id: None,
-                        todo_item_id: None,
-                        poll_option: None,
-                    }
-                    .into()
-                }),
+                reply_to: message.reply_to.map(input_reply_to),
                 message: message.text.clone(),
                 random_id,
                 reply_markup: message.reply_markup.clone(),
@@ -764,20 +776,7 @@ impl Client {
                 background: false,
                 clear_draft: false,
                 peer: peer.into(),
-                reply_to: first_media_reply.map(|reply_to_msg_id| {
-                    tl::types::InputReplyToMessage {
-                        reply_to_msg_id,
-                        top_msg_id: None,
-                        reply_to_peer_id: None,
-                        quote_text: None,
-                        quote_entities: None,
-                        quote_offset: None,
-                        monoforum_peer_id: None,
-                        todo_item_id: None,
-                        poll_option: None,
-                    }
-                    .into()
-                }),
+                reply_to: first_media_reply.map(input_reply_to),
                 schedule_date: None,
                 multi_media,
                 send_as: None,
@@ -1017,16 +1016,7 @@ impl Client {
             }
         };
 
-        use tl::enums::messages::Messages;
-
-        let (messages, users, chats) = match res {
-            Messages::Messages(m) => (m.messages, m.users, m.chats),
-            Messages::Slice(m) => (m.messages, m.users, m.chats),
-            Messages::ChannelMessages(m) => (m.messages, m.users, m.chats),
-            Messages::NotModified(_) => {
-                panic!("API returned Messages::NotModified even though GetMessages was used")
-            }
-        };
+        let (messages, users, chats) = unpack_messages(res);
 
         let peers = self.build_peer_map(users, chats).await;
         Ok(messages
@@ -1140,14 +1130,7 @@ impl Client {
                 .await
         }?;
 
-        let (messages, users, chats) = match result {
-            tl::enums::messages::Messages::Messages(m) => (m.messages, m.users, m.chats),
-            tl::enums::messages::Messages::Slice(m) => (m.messages, m.users, m.chats),
-            tl::enums::messages::Messages::ChannelMessages(m) => (m.messages, m.users, m.chats),
-            tl::enums::messages::Messages::NotModified(_) => {
-                panic!("API returned Messages::NotModified even though GetMessages was used")
-            }
-        };
+        let (messages, users, chats) = unpack_messages(result);
 
         let peers = self.build_peer_map(users, chats).await;
         let mut map = messages
@@ -1193,14 +1176,7 @@ impl Client {
                 .await
         }?;
 
-        let (messages, users, chats) = match result {
-            tl::enums::messages::Messages::Messages(m) => (m.messages, m.users, m.chats),
-            tl::enums::messages::Messages::Slice(m) => (m.messages, m.users, m.chats),
-            tl::enums::messages::Messages::ChannelMessages(m) => (m.messages, m.users, m.chats),
-            tl::enums::messages::Messages::NotModified(_) => {
-                panic!("API returned Messages::NotModified even though GetMessages was used")
-            }
-        };
+        let (messages, users, chats) = unpack_messages(result);
 
         let peers = self.build_peer_map(users, chats).await;
         Ok(messages

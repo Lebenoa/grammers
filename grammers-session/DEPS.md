@@ -15,7 +15,7 @@ Used to log messages during update processing.
 
 Used to test that this file lists all dependencies from `Cargo.toml`.
 
-## turso
+## libsql
 
 SQLite-based session storage.
 

@@ -17,7 +17,7 @@ edition = "2024"
 grammers-tl-types = { path = "../grammers-tl-types", version = "0.9.0" }
 log = "0.4.32"
 
-turso = { version = "0.6.1", default-features = false, optional = true }
+libsql = { version = "0.9.30", default-features = false, features = ["core"], optional = true }
 tokio = { version = "1.52.3", default-features = false, features = ["sync"] }
 
 serde = { version = "1", features = ["derive"], optional = true }
@@ -29,5 +29,5 @@ tokio = { version = "1.52.3", default-features = false, features = ["sync", "rt"
 
 [features]
 default = ["sqlite-storage"]
-sqlite-storage = ["dep:turso"]
+sqlite-storage = ["dep:libsql"]
 serde = ["dep:serde", "dep:serde_with"]

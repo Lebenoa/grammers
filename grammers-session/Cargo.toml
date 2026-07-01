@@ -15,7 +15,7 @@ edition = "2024"
 
 [dependencies]
 grammers-tl-types = { path = "../grammers-tl-types", version = "0.9.0" }
-log = "0.4.32"
+log = "0.4.33"
 
 libsql = { version = "0.9.30", default-features = false, features = ["core"], optional = true }
 tokio = { version = "1.52.3", default-features = false, features = ["sync"] }

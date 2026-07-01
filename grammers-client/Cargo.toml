@@ -33,7 +33,7 @@ grammers-tl-types = { path = "../grammers-tl-types", version = "0.9.0", features
     "tl-mtproto",
 ] }
 html5ever = { version = "0.39.0", optional = true }
-log = "0.4.32"
+log = "0.4.33"
 md5 = "0.8.0"
 mime_guess = "2.0.5"
 pin-project-lite = "0.2"

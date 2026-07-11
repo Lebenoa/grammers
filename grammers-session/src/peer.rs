@@ -120,6 +120,8 @@ pub enum ChannelKind {
     Megagroup,
     /// Value used for a channel with its [`tl::types::Channel::gigagroup`] flag set to `true`.
     Gigagroup,
+    /// Value used for a channel of [`tl::types::Community`] or [`tl::types::CommunityForbidden`] type.
+    Community,
 }
 
 /// Sentinel value used to represent the self-user
@@ -631,6 +633,8 @@ impl<'a> From<&'a tl::enums::Chat> for PeerRef {
             Chat::Forbidden(chat) => <Self as From<&_>>::from(chat),
             Chat::Channel(channel) => <Self as From<&_>>::from(channel),
             Chat::ChannelForbidden(channel) => <Self as From<&_>>::from(channel),
+            Chat::CommunityForbidden(community) => <Self as From<&_>>::from(community),
+            Chat::Community(community) => <Self as From<&_>>::from(community),
         }
     }
 }
@@ -709,6 +713,42 @@ impl<'a> From<&'a tl::types::ChannelForbidden> for PeerRef {
         Self {
             id: PeerId::channel_unchecked(channel.id),
             auth: PeerAuth::from_hash(channel.access_hash),
+        }
+    }
+}
+
+impl From<tl::types::CommunityForbidden> for PeerRef {
+    #[inline]
+    fn from(community: tl::types::CommunityForbidden) -> Self {
+        <Self as From<&tl::types::CommunityForbidden>>::from(&community)
+    }
+}
+impl<'a> From<&'a tl::types::CommunityForbidden> for PeerRef {
+    fn from(community: &'a tl::types::CommunityForbidden) -> Self {
+        Self {
+            id: PeerId::channel_unchecked(community.id),
+            auth: community
+                .access_hash
+                .map(PeerAuth::from_hash)
+                .unwrap_or(PeerAuth::default()),
+        }
+    }
+}
+
+impl From<tl::types::Community> for PeerRef {
+    #[inline]
+    fn from(community: tl::types::Community) -> Self {
+        <Self as From<&tl::types::Community>>::from(&community)
+    }
+}
+impl<'a> From<&'a tl::types::Community> for PeerRef {
+    fn from(community: &'a tl::types::Community) -> Self {
+        Self {
+            id: PeerId::channel_unchecked(community.id),
+            auth: community
+                .access_hash
+                .map(PeerAuth::from_hash)
+                .unwrap_or(PeerAuth::default()),
         }
     }
 }
@@ -834,6 +874,12 @@ impl<'a> From<&'a tl::enums::Chat> for PeerInfo {
             tl::enums::Chat::ChannelForbidden(channel) => {
                 <Self as From<&tl::types::ChannelForbidden>>::from(&channel)
             }
+            tl::enums::Chat::CommunityForbidden(community) => {
+                <Self as From<&tl::types::CommunityForbidden>>::from(&community)
+            }
+            tl::enums::Chat::Community(community) => {
+                <Self as From<&tl::types::Community>>::from(&community)
+            }
         }
     }
 }
@@ -951,6 +997,41 @@ impl<'a> From<&'a tl::types::ChannelForbidden> for PeerInfo {
             id: channel.id,
             auth: Some(PeerAuth(channel.access_hash)),
             kind: <ChannelKind as TryFrom<&'a tl::types::ChannelForbidden>>::try_from(channel).ok(),
+        }
+    }
+}
+
+impl From<tl::types::CommunityForbidden> for PeerInfo {
+    #[inline]
+    fn from(community: tl::types::CommunityForbidden) -> Self {
+        <Self as From<&tl::types::CommunityForbidden>>::from(&community)
+    }
+}
+impl<'a> From<&'a tl::types::CommunityForbidden> for PeerInfo {
+    fn from(community: &'a tl::types::CommunityForbidden) -> Self {
+        Self::Channel {
+            id: community.id,
+            auth: community.access_hash.map(PeerAuth::from_hash),
+            kind: Some(ChannelKind::Community),
+        }
+    }
+}
+
+impl From<tl::types::Community> for PeerInfo {
+    #[inline]
+    fn from(community: tl::types::Community) -> Self {
+        <Self as From<&tl::types::Community>>::from(&community)
+    }
+}
+impl<'a> From<&'a tl::types::Community> for PeerInfo {
+    fn from(community: &'a tl::types::Community) -> Self {
+        Self::Channel {
+            id: community.id,
+            auth: community
+                .access_hash
+                .map(PeerAuth)
+                .filter(|_| !community.min),
+            kind: Some(ChannelKind::Community),
         }
     }
 }

@@ -118,6 +118,9 @@ impl ParticipantIter {
                     tl::enums::ChatFull::ChannelFull(_) => panic!(
                         "API returned ChannelFull even though messages::GetFullChat was used"
                     ),
+                    tl::enums::ChatFull::CommunityFull(_) => panic!(
+                        "API returned CommunityFull even though messages::GetFullChat was used"
+                    ),
                 };
 
                 // Don't actually care for the chats, just the users.

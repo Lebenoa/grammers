@@ -79,6 +79,7 @@ enum PeerSubtype {
     Megagroup = 4,
     Broadcast = 8,
     Gigagroup = 12,
+    Community = 16,
 }
 
 impl Database {
@@ -404,6 +405,7 @@ impl Session for SqliteSession {
                     ChannelKind::Megagroup => PeerSubtype::Megagroup,
                     ChannelKind::Broadcast => PeerSubtype::Broadcast,
                     ChannelKind::Gigagroup => PeerSubtype::Gigagroup,
+                    ChannelKind::Community => PeerSubtype::Community,
                 }),
             };
             let mut params = vec![];

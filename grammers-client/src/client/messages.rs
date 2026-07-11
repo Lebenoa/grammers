@@ -504,6 +504,7 @@ impl GlobalSearchIter {
                 broadcasts_only: false,
                 groups_only: false,
                 users_only: false,
+                community: None,
             },
         )
     }

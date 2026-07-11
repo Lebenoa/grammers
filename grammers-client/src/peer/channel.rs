@@ -103,6 +103,7 @@ impl Channel {
                             send_paid_messages_stars: None,
                             forum_tabs: false,
                             linked_monoforum_id: None,
+                            linked_community_id: None,
                         },
                         client: client.clone(),
                     }
@@ -110,6 +111,8 @@ impl Channel {
                     panic!("tried to create broadcast channel from megagroup");
                 }
             }
+            C::CommunityForbidden(_) => panic!("cannot create from community forbidden"),
+            C::Community(_) => panic!("cannot create from community"),
         }
     }
 
@@ -209,6 +212,7 @@ impl Channel {
                 delete_stories: true,
                 manage_direct_messages: true,
                 manage_ranks: true,
+                manage_linked_peers: true,
             }),
             None => None,
         }

@@ -244,6 +244,14 @@ impl Downloadable for Photo {
     fn size(&self) -> Option<usize> {
         self.size()
     }
+
+    fn dc_id(&self) -> Option<i32> {
+        use tl::enums::Photo as P;
+        match self.raw.photo.as_ref()? {
+            P::Empty(_) => None,
+            P::Photo(photo) => Some(photo.dc_id),
+        }
+    }
 }
 
 impl Document {
@@ -463,6 +471,14 @@ impl Downloadable for Document {
 
     fn size(&self) -> Option<usize> {
         self.size()
+    }
+
+    fn dc_id(&self) -> Option<i32> {
+        use tl::enums::Document as D;
+        match self.raw.document.as_ref()? {
+            D::Empty(_) => None,
+            D::Document(document) => Some(document.dc_id),
+        }
     }
 }
 
@@ -871,6 +887,21 @@ impl Downloadable for Media {
 
     fn size(&self) -> Option<usize> {
         self.size()
+    }
+
+    fn dc_id(&self) -> Option<i32> {
+        match self {
+            Media::Photo(photo) => photo.dc_id(),
+            Media::Document(document) => document.dc_id(),
+            Media::Sticker(sticker) => sticker.document.dc_id(),
+            Media::Contact(_) => None,
+            Media::Poll(_) => None,
+            Media::Geo(_) => None,
+            Media::Dice(_) => None,
+            Media::Venue(_) => None,
+            Media::GeoLive(_) => None,
+            Media::WebPage(_) => None,
+        }
     }
 }
 

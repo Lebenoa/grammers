@@ -14,9 +14,8 @@ use std::sync::Arc;
 use std::{env, time::Duration};
 
 use grammers_client::Client;
-use grammers_client::client::UpdatesConfiguration;
 use grammers_client::update::Update;
-use grammers_mtsender::SenderPool;
+use grammers_mtsender::{SenderPool, UpdatesConfiguration};
 use grammers_session::storages::SqliteSession;
 use simple_logger::SimpleLogger;
 use tokio::task::JoinSet;

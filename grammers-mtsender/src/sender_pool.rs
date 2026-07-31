@@ -7,24 +7,28 @@
 // except according to those terms.
 
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddrV4, SocketAddrV6};
+use std::num::NonZeroU32;
 use std::ops::{ControlFlow, Deref};
 use std::sync::Arc;
+use std::time::Duration;
 use std::{fmt, panic};
 
 use grammers_mtproto::{mtp, transport};
 use grammers_session::types::{DcOption, PeerId, PeerInfo, PeerRef, UpdateState, UpdatesState};
 use grammers_session::updates::UpdatesLike;
 use grammers_session::{BoxFuture, ErasedSession, Session};
-use grammers_tl_types::{self as tl, enums};
+use grammers_tl_types::{self as tl, Deserializable, enums};
+use log::info;
 use tokio::task::AbortHandle;
 use tokio::{
     sync::{mpsc, oneshot},
     task::JoinSet,
+    time::sleep,
 };
 
-use crate::configuration::ConnectionParams;
-use crate::errors::ReadError;
-use crate::{InvocationError, Sender, ServerAddr, connect, connect_with_auth};
+use crate::configuration::{ConnectionParams, RetryContext};
+use crate::errors::{InvocationError, ReadError};
+use crate::{Sender, ServerAddr, connect, connect_with_auth};
 
 pub(crate) type Transport = transport::Full;
 
@@ -35,6 +39,12 @@ enum Request {
         dc_id: i32,
         body: Vec<u8>,
         tx: oneshot::Sender<Result<InvokeResponse, InvocationError>>,
+    },
+    CheckRetry {
+        error: InvocationError,
+        fail_count: NonZeroU32,
+        slept_so_far: Duration,
+        tx: oneshot::Sender<ControlFlow<InvocationError, Duration>>,
     },
     Disconnect {
         dc_id: i32,
@@ -117,8 +127,20 @@ impl Deref for SenderPoolFatHandle {
 
 impl SenderPoolHandle {
     /// Communicate with the running [`SenderPoolRunner`] instance
+    /// to invoke the request in the specified datacenter.
+    pub async fn invoke_in_dc<R: tl::RemoteCall>(
+        &self,
+        dc_id: i32,
+        request: &R,
+    ) -> Result<R::Return, InvocationError> {
+        self.do_invoke_in_dc(dc_id, request.to_bytes())
+            .await
+            .and_then(|body| R::Return::from_bytes(&body).map_err(|e| e.into()))
+    }
+
+    /// Communicate with the running [`SenderPoolRunner`] instance
     /// to invoke the serialized request body in the specified datacenter.
-    pub async fn invoke_in_dc(
+    pub async fn raw_invoke_in_dc(
         &self,
         dc_id: i32,
         body: Vec<u8>,
@@ -145,6 +167,63 @@ impl SenderPoolHandle {
     /// to drop all active connections and gracefully stop running.
     pub fn quit(&self) -> bool {
         self.0.send(Request::Quit).is_ok()
+    }
+
+    /// do [`Self::raw_invoke_in_dc`] with [`Self::check_retry`]
+    pub(crate) async fn do_invoke_in_dc(
+        &self,
+        dc_id: i32,
+        request_body: Vec<u8>,
+    ) -> Result<Vec<u8>, InvocationError> {
+        let mut fail_count = NonZeroU32::new(1).unwrap();
+        let mut slept_so_far = Duration::default();
+
+        loop {
+            match self.raw_invoke_in_dc(dc_id, request_body.clone()).await {
+                Ok(response) => break Ok(response),
+                Err(e) => {
+                    let error_info = format!("{}", e);
+                    match self.check_retry(e, fail_count, slept_so_far).await {
+                        ControlFlow::Continue(delay) => {
+                            info!("sleeping on {} for {:?} before retrying", error_info, delay,);
+                            sleep(delay).await;
+                            fail_count = fail_count.saturating_add(1);
+                            slept_so_far += delay;
+                            continue;
+                        }
+                        ControlFlow::Break(final_error) => break Err(final_error),
+                    }
+                }
+            }
+        }
+    }
+
+    /// Communicate with the running [`SenderPoolRunner`] instance
+    /// to check whether the request needs to retry.
+    async fn check_retry(
+        &self,
+        error: InvocationError,
+        fail_count: NonZeroU32,
+        slept_so_far: Duration,
+    ) -> ControlFlow<InvocationError, Duration> {
+        let (tx, rx) = oneshot::channel();
+        if self
+            .0
+            .send(Request::CheckRetry {
+                error,
+                fail_count,
+                slept_so_far,
+                tx,
+            })
+            .is_err()
+        {
+            return ControlFlow::Break(InvocationError::Dropped);
+        }
+
+        match rx.await {
+            Ok(flow) => flow,
+            Err(_) => ControlFlow::Break(InvocationError::Dropped),
+        }
     }
 }
 
@@ -191,7 +270,7 @@ impl SenderPool {
             },
             handle: SenderPoolFatHandle {
                 thin: SenderPoolHandle(request_tx),
-                session,
+                session: Arc::clone(&session),
                 api_id,
             },
             updates: updates_rx,
@@ -252,6 +331,28 @@ impl SenderPoolRunner {
                     },
                 };
                 let _ = connection.rpc_tx.send(Rpc { body, tx });
+                ControlFlow::Continue(())
+            }
+            Request::CheckRetry {
+                error,
+                fail_count,
+                slept_so_far,
+                tx,
+            } => {
+                let retry_context = RetryContext {
+                    fail_count,
+                    slept_so_far,
+                    error,
+                };
+                let flow = match self
+                    .connection_params
+                    .retry_policy
+                    .should_retry(&retry_context)
+                {
+                    ControlFlow::Continue(delay) => ControlFlow::Continue(delay),
+                    ControlFlow::Break(()) => ControlFlow::Break(retry_context.error),
+                };
+                let _ = tx.send(flow);
                 ControlFlow::Continue(())
             }
             Request::Disconnect { dc_id } => {
@@ -444,6 +545,18 @@ impl fmt::Debug for Request {
                         .map(|constructor_id| tl::name_for_id(u32::from_le_bytes(constructor_id)))
                         .unwrap_or("?"),
                 )
+                .field("tx", tx)
+                .finish(),
+            Self::CheckRetry {
+                error,
+                fail_count,
+                slept_so_far,
+                tx,
+            } => f
+                .debug_struct("CheckRetry")
+                .field("error", error)
+                .field("fail_count", fail_count)
+                .field("slept_so_far", slept_so_far)
                 .field("tx", tx)
                 .finish(),
             Self::Disconnect { dc_id } => {

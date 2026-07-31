@@ -18,17 +18,15 @@ mod files;
 mod iter_buffer;
 mod messages;
 mod net;
-mod retry_policy;
 mod updates;
 
 pub use auth::{LoginToken, PasswordToken, SignInError};
 pub use bots::{InlineResult, InlineResultIter};
 pub use chats::{ParticipantIter, ParticipantPermissions, ProfilePhotoIter};
 pub(crate) use client::ClientInner;
-pub use client::{Client, ClientConfiguration, UpdatesConfiguration};
+pub use client::{Client, ClientConfiguration};
 pub use dialogs::DialogIter;
 pub use files::DownloadIter;
 pub use iter_buffer::IterBuffer;
 pub use messages::{GlobalSearchIter, MessageIter, SearchIter};
-pub use retry_policy::{AutoSleep, NoRetries, RetryContext, RetryPolicy};
 pub use updates::UpdateStream;

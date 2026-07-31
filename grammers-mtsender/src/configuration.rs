@@ -6,6 +6,12 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+use std::num::NonZeroU32;
+use std::ops::ControlFlow;
+use std::time::Duration;
+
+use crate::errors::{InvocationError, RpcError};
+
 const DEFAULT_LOCALE: &str = "en";
 
 /// Connection parameters used whenever a new connection is initialized.
@@ -40,11 +46,86 @@ pub struct ConnectionParams {
     pub proxy_url: Option<String>,
     /// Whether to connect via IPv6 instead of defaulting to IPv4.
     pub use_ipv6: bool,
+    /// The retry policy to use when encountering errors after invoking a request.
+    pub retry_policy: Box<dyn super::RetryPolicy>,
+
     #[doc(hidden)]
     pub __non_exhaustive: (),
 }
 
+/// Configuration that controls [`crate::UpdatesReceiver`].
+pub struct UpdatesConfiguration {
+    /// Should the [`crate::UpdatesReceiver`] catch-up on updates sent to it while it was offline?
+    ///
+    /// By default, updates sent while the [`crate::UpdatesReceiver`] was offline are ignored.
+    pub catch_up: bool,
+
+    /// How many updates may be buffered by the [`crate::UpdatesReceiver`] at any given time.
+    ///
+    /// Telegram passively sends updates to the [`crate::UpdatesReceiver`] through the open connection, so they must
+    /// be buffered until the application has the capacity to consume them.
+    ///
+    /// Upon reaching this limit, updates will be dropped, and a warning log message will be
+    /// emitted (but not too often, to avoid spamming the log), in order to let the developer
+    /// know that they should either change how they handle updates or increase the limit.
+    ///
+    /// A limit of zero (`Some(0)`) indicates that updates should not be buffered.
+    /// They will be immediately dropped, and no warning will ever be emitted.
+    ///
+    /// A limit of `None` disables the upper bound for the buffer. This is not recommended, as it
+    /// could eventually lead to memory exhaustion. This option will also not emit any warnings.
+    ///
+    /// The default limit, which may change at any time, should be enough for user accounts,
+    /// although bot accounts may need to increase the limit depending on their capacity.
+    ///
+    /// When the limit is `Some`, a buffer to hold that many updates will be pre-allocated.
+    pub update_queue_limit: Option<usize>,
+}
+
+/// This trait controls how the [`SenderPoolRunner`] should behave when
+/// an invoked request fails with an [`InvocationError`].
+///
+/// [`SenderPoolRunner`]: crate::SenderPoolRunner
+pub trait RetryPolicy: Send + Sync {
+    /// Determines whether the failing request should retry.
+    ///
+    /// If it should Continue, a sleep duration before retrying is included.\
+    /// If it should Break, the context error will be propagated to the caller.
+    fn should_retry(&self, ctx: &RetryContext) -> ControlFlow<(), Duration>;
+}
+
+/// Context passed to [`RetryPolicy::should_retry`].
+pub struct RetryContext {
+    /// Amount of times the instance of this request has failed.
+    pub fail_count: NonZeroU32,
+    /// Sum of the durations for all previous continuations (not total time elapsed since first failure).
+    pub slept_so_far: Duration,
+    /// The most recent error caused by the instance of the request.
+    pub error: InvocationError,
+}
+
+/// Retry policy that will never retry.
+pub struct NoRetries;
+
+/// Retry policy that will retry up to `tries` times on flood-wait and slow mode wait errors.
+///
+/// The library will sleep only if the duration to sleep for is below or equal to the threshold.
+pub struct AutoSleep {
+    /// The (inclusive) number of tries below which the request should be retried.
+    pub tries: NonZeroU32,
+
+    /// The (inclusive) threshold below which the library should automatically sleep.
+    pub threshold: Duration,
+
+    /// `Some` if I/O errors should be treated as a flood error that would last the specified duration.
+    /// This duration will ignore the `threshold` and always be slept on I/O errors while `tries` is not exceeded.
+    pub io_errors_as_flood_of: Option<Duration>,
+}
+
 impl Default for ConnectionParams {
+    /// Returns an instance with an [`AutoSleep::default`] retry policy.
+    ///
+    /// [`AutoSleep::default`]: super::AutoSleep::default
     fn default() -> Self {
         let info = os_info::get();
 
@@ -72,7 +153,60 @@ impl Default for ConnectionParams {
             use_ipv6: false,
             #[cfg(feature = "proxy")]
             proxy_url: None,
+            retry_policy: Box::new(super::AutoSleep::default()),
             __non_exhaustive: (),
+        }
+    }
+}
+
+impl Default for UpdatesConfiguration {
+    /// Returns an instance that will not catch up, with a queue limit of 100 updates,
+    /// where encountered peers are automatically passed to [`grammers_session::Session::cache_peer`].
+    fn default() -> Self {
+        Self {
+            catch_up: false,
+            update_queue_limit: Some(100),
+        }
+    }
+}
+
+impl RetryPolicy for NoRetries {
+    fn should_retry(&self, _: &RetryContext) -> ControlFlow<(), Duration> {
+        ControlFlow::Break(())
+    }
+}
+
+impl RetryPolicy for AutoSleep {
+    fn should_retry(&self, ctx: &RetryContext) -> ControlFlow<(), Duration> {
+        match ctx.error {
+            InvocationError::Rpc(RpcError {
+                code: 420,
+                value: Some(seconds),
+                ..
+            }) if ctx.fail_count <= self.tries && seconds as u64 <= self.threshold.as_secs() => {
+                ControlFlow::Continue(Duration::from_secs(seconds as _))
+            }
+            InvocationError::Io(_) if ctx.fail_count <= self.tries => {
+                if let Some(duration) = self.io_errors_as_flood_of {
+                    ControlFlow::Continue(duration)
+                } else {
+                    ControlFlow::Break(())
+                }
+            }
+            _ => ControlFlow::Break(()),
+        }
+    }
+}
+
+impl Default for AutoSleep {
+    /// Returns an instance with a threshold of 60 seconds.
+    ///
+    /// I/O errors will be treated as if they were a 1-second flood.
+    fn default() -> Self {
+        Self {
+            tries: NonZeroU32::MIN,
+            threshold: Duration::from_secs(60),
+            io_errors_as_flood_of: Some(Duration::from_secs(1)),
         }
     }
 }

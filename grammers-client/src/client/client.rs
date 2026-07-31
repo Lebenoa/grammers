@@ -36,10 +36,7 @@ pub struct Client(pub(crate) Arc<ClientInner>);
 
 /// Configuration that controls the [`Client`] behaviour when making requests.
 pub struct ClientConfiguration {
-    /// The retry policy to use when encountering errors after invoking a request.
-    pub retry_policy: Box<dyn super::RetryPolicy>,
-
-    /// Whether to call [`Session::cache_peer`] on all peer information that
+    /// Whether to call [`grammers_session::Session::cache_peer`] on all peer information that
     /// the high-level methods receive as a response (e.g. [`Client::iter_dialogs`]).
     ///
     /// The cached peers are then usable by other methods such as [`Client::resolve_peer`]
@@ -47,54 +44,11 @@ pub struct ClientConfiguration {
     pub auto_cache_peers: bool,
 }
 
-/// Configuration that controls [`Client::stream_updates`].
-pub struct UpdatesConfiguration {
-    /// Should the client catch-up on updates sent to it while it was offline?
-    ///
-    /// By default, updates sent while the client was offline are ignored.
-    pub catch_up: bool,
-
-    /// How many updates may be buffered by the client at any given time.
-    ///
-    /// Telegram passively sends updates to the client through the open connection, so they must
-    /// be buffered until the application has the capacity to consume them.
-    ///
-    /// Upon reaching this limit, updates will be dropped, and a warning log message will be
-    /// emitted (but not too often, to avoid spamming the log), in order to let the developer
-    /// know that they should either change how they handle updates or increase the limit.
-    ///
-    /// A limit of zero (`Some(0)`) indicates that updates should not be buffered.
-    /// They will be immediately dropped, and no warning will ever be emitted.
-    ///
-    /// A limit of `None` disables the upper bound for the buffer. This is not recommended, as it
-    /// could eventually lead to memory exhaustion. This option will also not emit any warnings.
-    ///
-    /// The default limit, which may change at any time, should be enough for user accounts,
-    /// although bot accounts may need to increase the limit depending on their capacity.
-    ///
-    /// When the limit is `Some`, a buffer to hold that many updates will be pre-allocated.
-    pub update_queue_limit: Option<usize>,
-}
-
 impl Default for ClientConfiguration {
-    /// Returns an instance that with an [`AutoSleep::default`] retry policy,
-    /// where encountered peers are automatically passed to [`Session::cache_peer`].
-    ///
-    /// [`AutoSleep::default`]: super::AutoSleep::default
+    /// Returns an instance that encountered peers are automatically passed to [`grammers_session::Session::cache_peer`].
     fn default() -> Self {
         Self {
-            retry_policy: Box::new(super::AutoSleep::default()),
             auto_cache_peers: true,
-        }
-    }
-}
-
-impl Default for UpdatesConfiguration {
-    /// Returns an instance that will not catch up, with a queue limit of 100 updates.
-    fn default() -> Self {
-        Self {
-            catch_up: false,
-            update_queue_limit: Some(100),
         }
     }
 }

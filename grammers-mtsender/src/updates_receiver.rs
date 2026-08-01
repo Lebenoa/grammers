@@ -10,7 +10,7 @@ use std::collections::VecDeque;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use grammers_session::ErasedSession;
+use grammers_session::storages::ErasedSession;
 use grammers_session::types::{PeerId, PeerInfo, UpdateState, UpdatesState};
 use grammers_session::updates::{MessageBoxes, PrematureEndReason, State, UpdatesLike};
 use grammers_tl_types::{self as tl, Deserializable};

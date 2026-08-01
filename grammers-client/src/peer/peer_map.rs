@@ -9,7 +9,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use grammers_session::ErasedSession;
+use grammers_session::storages::ErasedSession;
 use grammers_session::types::{PeerId, PeerRef};
 
 use crate::peer::{Peer, User};

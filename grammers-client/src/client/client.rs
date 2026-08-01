@@ -9,7 +9,7 @@
 use std::sync::Arc;
 
 use grammers_mtsender::SenderPoolHandle;
-use grammers_session::ErasedSession;
+use grammers_session::storages::ErasedSession;
 
 pub(crate) struct ClientInner {
     pub(crate) session: Arc<ErasedSession>,

@@ -10,8 +10,6 @@ use crate::BoxFuture;
 use crate::peer::PeerRef;
 use crate::types::{DcOption, PeerId, PeerInfo, UpdateState, UpdatesState};
 
-pub type ErasedSession = dyn Session<Error = Box<dyn std::error::Error + Send + Sync + 'static>>;
-
 /// The main interface to interact with the different [`crate::storages`].
 ///
 /// All methods are synchronous and currently infallible because clients

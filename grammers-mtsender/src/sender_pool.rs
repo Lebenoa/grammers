@@ -457,7 +457,7 @@ impl SenderPoolRunner {
         Ok(sender)
     }
 
-    async fn update_config(&mut self, config: tl::types::Config) -> Result<(), InvocationError> {
+    async fn update_config(&self, config: tl::types::Config) -> Result<(), InvocationError> {
         for option in config
             .dc_options
             .iter()
@@ -500,6 +500,7 @@ impl SenderPoolRunner {
                     )
                 }
             }
+            self.session.set_dc_option(&dc_option).await?;
         }
         Ok(())
     }

@@ -6,8 +6,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use chrono::{DateTime, Utc};
 use grammers_tl_types as tl;
+use jiff::Timestamp;
 
 use crate::utils;
 
@@ -147,7 +147,7 @@ impl Restrictions {
         self.raw.pin_messages
     }
 
-    pub fn due(&self) -> DateTime<Utc> {
+    pub fn due(&self) -> Timestamp {
         utils::date(self.raw.until_date)
     }
 }

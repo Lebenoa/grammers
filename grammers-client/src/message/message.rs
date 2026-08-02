@@ -10,10 +10,10 @@ use std::fmt;
 #[cfg(feature = "fs")]
 use std::path::Path;
 
-use chrono::{DateTime, Utc};
 use grammers_mtsender::InvocationError;
 use grammers_session::types::{PeerId, PeerKind, PeerRef};
 use grammers_tl_types as tl;
+use jiff::Timestamp;
 
 use super::{InputMessage, InputReactions};
 use crate::Client;
@@ -341,7 +341,7 @@ impl Message {
     }
 
     /// The date when this message was produced.
-    pub fn date(&self) -> DateTime<Utc> {
+    pub fn date(&self) -> Timestamp {
         utils::date(self.date_timestamp())
     }
 
@@ -531,7 +531,7 @@ impl Message {
     }
 
     /// The date when this message was last edited.
-    pub fn edit_date(&self) -> Option<DateTime<Utc>> {
+    pub fn edit_date(&self) -> Option<Timestamp> {
         match &self.raw {
             tl::enums::Message::Empty(_) => None,
             tl::enums::Message::Message(message) => message.edit_date.map(utils::date),

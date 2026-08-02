@@ -8,8 +8,8 @@
 
 use std::fmt::Debug;
 
-use chrono::{DateTime, Utc};
 use grammers_tl_types as tl;
+use jiff::Timestamp;
 
 use super::{Downloadable, PhotoSize};
 
@@ -321,10 +321,10 @@ impl Document {
     }
 
     /// The date on which the file was created, if any.
-    pub fn creation_date(&self) -> Option<DateTime<Utc>> {
+    pub fn creation_date(&self) -> Option<Timestamp> {
         match self.raw.document.as_ref() {
             Some(tl::enums::Document::Document(d)) => {
-                Some(DateTime::<Utc>::from_timestamp(d.date as i64, 0).expect("date out of range"))
+                Some(Timestamp::from_second(d.date as i64).expect("date out of range"))
             }
             _ => None,
         }

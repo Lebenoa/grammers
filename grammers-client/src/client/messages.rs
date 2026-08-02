@@ -10,10 +10,10 @@
 
 use std::collections::HashMap;
 
-use chrono::{DateTime, FixedOffset};
 use grammers_mtsender::InvocationError;
 use grammers_session::types::{PeerAuth, PeerId, PeerKind, PeerRef};
 use grammers_tl_types::{self as tl, enums::InputPeer};
+use jiff::Timestamp;
 use log::{Level, log_enabled, warn};
 
 use super::{Client, IterBuffer};
@@ -403,38 +403,38 @@ impl SearchIter {
     /// Returns only messages with date bigger than date_time.
     ///
     /// ```
-    /// use chrono::DateTime;
+    /// use jiff::Timestamp;
     ///
     /// # async fn f(peer: grammers_session::types::PeerRef, client: grammers_client::Client) -> Result<(), Box<dyn std::error::Error>> {
     /// // Search messages sent after Jan 1st, 2021
-    /// let min_date = DateTime::parse_from_rfc3339("2021-01-01T00:00:00-00:00").unwrap();
+    /// let min_date: Timestamp = "2022-12-25T00:00:00-00:00".parse().unwrap();
     ///
-    /// let mut messages = client.search_messages(peer).min_date(&min_date);
+    /// let mut messages = client.search_messages(peer).min_date(min_date);
     ///
     /// # Ok(())
     /// # }
     /// ```
-    pub fn min_date(mut self, date_time: &DateTime<FixedOffset>) -> Self {
-        self.request.min_date = date_time.timestamp() as i32;
+    pub fn min_date(mut self, date_time: Timestamp) -> Self {
+        self.request.min_date = date_time.as_second() as i32;
         self
     }
 
     /// Returns only messages with date smaller than date_time
     ///
     /// ```
-    /// use chrono::DateTime;
+    /// use jiff::Timestamp;
     ///
     /// # async fn f(peer: grammers_session::types::PeerRef, client: grammers_client::Client) -> Result<(), Box<dyn std::error::Error>> {
     /// // Search messages sent before Dec, 25th 2022
-    /// let max_date = DateTime::parse_from_rfc3339("2022-12-25T00:00:00-00:00").unwrap();
+    /// let max_date: Timestamp = "2022-12-25T00:00:00-00:00".parse().unwrap();
     ///
-    /// let mut messages = client.search_messages(peer).max_date(&max_date);
+    /// let mut messages = client.search_messages(peer).max_date(max_date);
     ///
     /// # Ok(())
     /// # }
     /// ```
-    pub fn max_date(mut self, date_time: &DateTime<FixedOffset>) -> Self {
-        self.request.max_date = date_time.timestamp() as i32;
+    pub fn max_date(mut self, date_time: Timestamp) -> Self {
+        self.request.max_date = date_time.as_second() as i32;
         self
     }
 

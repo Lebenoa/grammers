@@ -458,7 +458,7 @@ impl SenderPoolRunner {
         Ok(sender)
     }
 
-    async fn update_config(&self, config: tl::types::Config) -> Result<(), InvocationError> {
+    async fn update_config(&self, config: tl::types::Config) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         for option in config
             .dc_options
             .iter()

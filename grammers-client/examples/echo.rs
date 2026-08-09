@@ -79,13 +79,7 @@ async fn async_main() -> Result {
     // You can use `task::spawn` if you don't care about dropping unfinished handlers midway.
     let mut handler_tasks = JoinSet::new();
     let mut updates = client
-        .stream_updates(
-            updates,
-            UpdatesConfiguration {
-                catch_up: true,
-                ..Default::default()
-            },
-        )
+        .stream_updates(updates, UpdatesConfiguration { catch_up: true })
         .await?;
     loop {
         // Empty finished handlers (you could look at their return value here too.)

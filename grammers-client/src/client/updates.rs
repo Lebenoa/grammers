@@ -68,7 +68,7 @@ impl Client {
     /// but their raw type is still accessible to bridge any missing functionality.
     pub async fn stream_updates(
         &self,
-        updates: mpsc::UnboundedReceiver<UpdatesLike>,
+        updates: mpsc::Receiver<UpdatesLike>,
         configuration: UpdatesConfiguration,
     ) -> Result<UpdateStream, Box<dyn std::error::Error + Send + Sync>> {
         let updates = UpdatesReceiver::create(

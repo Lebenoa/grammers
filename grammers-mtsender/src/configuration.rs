@@ -6,7 +6,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::num::NonZeroU32;
+use std::num::{NonZeroU32, NonZeroUsize};
 use std::ops::ControlFlow;
 use std::time::Duration;
 
@@ -24,15 +24,20 @@ const DEFAULT_LOCALE: &str = "en";
 pub struct ConnectionParams {
     /// "Device model" according to [`initConnection`](https://core.telegram.org/method/initConnection).
     pub device_model: String,
+
     /// "Operation system version" according to [`initConnection`](https://core.telegram.org/method/initConnection).
     pub system_version: String,
+
     /// "Application version" according to [`initConnection`](https://core.telegram.org/method/initConnection).
     pub app_version: String,
+
     /// Code for the language used on the device's OS, formatted using the ISO 639-1 standard.
     pub system_lang_code: String,
+
     /// Either an ISO 639-1 language code or a language pack name obtained from
     /// a [language pack link](https://core.telegram.org/api/links#language-pack-links).
     pub lang_code: String,
+
     /// URL of the proxy to use. Requires the `proxy` feature to be enabled.
     ///
     /// The scheme must be `socks5`. Username and password are optional, e.g.:
@@ -44,10 +49,18 @@ pub struct ConnectionParams {
     /// the host manually and selecting an IP address of your choice.
     #[cfg(feature = "proxy")]
     pub proxy_url: Option<String>,
+
     /// Whether to connect via IPv6 instead of defaulting to IPv4.
     pub use_ipv6: bool,
+
     /// The retry policy to use when encountering errors after invoking a request.
     pub retry_policy: Box<dyn super::RetryPolicy>,
+
+    /// Maximum number of updates that can be buffered in the internal channel
+    /// between the network senders and the updates receiver.
+    ///
+    /// When the channel is full, newly received updates are **dropped**.
+    pub updates_channel_capacity: NonZeroUsize,
 
     #[doc(hidden)]
     pub __non_exhaustive: (),
@@ -59,27 +72,6 @@ pub struct UpdatesConfiguration {
     ///
     /// By default, updates sent while the [`crate::UpdatesReceiver`] was offline are ignored.
     pub catch_up: bool,
-
-    /// How many updates may be buffered by the [`crate::UpdatesReceiver`] at any given time.
-    ///
-    /// Telegram passively sends updates to the [`crate::UpdatesReceiver`] through the open connection, so they must
-    /// be buffered until the application has the capacity to consume them.
-    ///
-    /// Upon reaching this limit, updates will be dropped, and a warning log message will be
-    /// emitted (but not too often, to avoid spamming the log), in order to let the developer
-    /// know that they should either change how they handle updates or increase the limit.
-    ///
-    /// A limit of zero (`Some(0)`) indicates that updates should not be buffered.
-    /// They will be immediately dropped, and no warning will ever be emitted.
-    ///
-    /// A limit of `None` disables the upper bound for the buffer. This is not recommended, as it
-    /// could eventually lead to memory exhaustion. This option will also not emit any warnings.
-    ///
-    /// The default limit, which may change at any time, should be enough for user accounts,
-    /// although bot accounts may need to increase the limit depending on their capacity.
-    ///
-    /// When the limit is `Some`, a buffer to hold that many updates will be pre-allocated.
-    pub update_queue_limit: Option<usize>,
 }
 
 /// This trait controls how the [`SenderPoolRunner`] should behave when
@@ -123,7 +115,8 @@ pub struct AutoSleep {
 }
 
 impl Default for ConnectionParams {
-    /// Returns an instance with an [`AutoSleep::default`] retry policy.
+    /// Returns an instance with an [`AutoSleep::default`] retry policy,
+    /// with a capacity of 100 updates.
     ///
     /// [`AutoSleep::default`]: super::AutoSleep::default
     fn default() -> Self {
@@ -154,19 +147,16 @@ impl Default for ConnectionParams {
             #[cfg(feature = "proxy")]
             proxy_url: None,
             retry_policy: Box::new(super::AutoSleep::default()),
+            updates_channel_capacity: NonZeroUsize::new(100).unwrap(),
             __non_exhaustive: (),
         }
     }
 }
 
 impl Default for UpdatesConfiguration {
-    /// Returns an instance that will not catch up, with a queue limit of 100 updates,
-    /// where encountered peers are automatically passed to [`grammers_session::Session::cache_peer`].
+    /// Returns an instance that will not catch up.
     fn default() -> Self {
-        Self {
-            catch_up: false,
-            update_queue_limit: Some(100),
-        }
+        Self { catch_up: false }
     }
 }
 

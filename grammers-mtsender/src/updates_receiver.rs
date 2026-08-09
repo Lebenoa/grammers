@@ -8,7 +8,6 @@
 
 use std::collections::VecDeque;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
 
 use grammers_session::storages::ErasedSession;
 use grammers_session::types::{PeerId, PeerInfo, UpdateState, UpdatesState};
@@ -20,9 +19,6 @@ use tokio::time::timeout_at;
 
 use crate::{InvocationError, SenderPoolHandle, UpdatesConfiguration};
 
-/// How long to wait after warning the user that the updates limit was exceeded.
-const UPDATE_LIMIT_EXCEEDED_LOG_COOLDOWN: Duration = Duration::from_secs(300);
-
 // See https://core.telegram.org/method/updates.getChannelDifference.
 const BOT_CHANNEL_DIFF_LIMIT: i32 = 100000;
 const USER_CHANNEL_DIFF_LIMIT: i32 = 100;
@@ -31,16 +27,12 @@ pub struct UpdatesReceiver {
     handle: SenderPoolHandle,
     session: Arc<ErasedSession>,
     message_box: MessageBoxes,
-    updates: mpsc::UnboundedReceiver<UpdatesLike>,
-    configuration: UpdatesConfiguration,
+    updates: mpsc::Receiver<UpdatesLike>,
     buffer: VecDeque<(
         Vec<(tl::enums::Update, State)>,
         Vec<tl::enums::User>,
         Vec<tl::enums::Chat>,
     )>,
-    // When did we last warn the user that the update queue filled up?
-    // This is used to avoid spamming the log.
-    last_update_limit_warn: Option<Instant>,
     should_get_state: bool,
 }
 
@@ -96,7 +88,7 @@ impl UpdatesReceiver {
     pub async fn create(
         handle: SenderPoolHandle,
         session: Arc<ErasedSession>,
-        updates: mpsc::UnboundedReceiver<UpdatesLike>,
+        updates: mpsc::Receiver<UpdatesLike>,
         configuration: UpdatesConfiguration,
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         let message_box = if configuration.catch_up {
@@ -115,9 +107,7 @@ impl UpdatesReceiver {
             session,
             message_box,
             updates,
-            configuration,
             buffer: VecDeque::new(),
-            last_update_limit_warn: None,
             should_get_state,
         })
     }
@@ -274,31 +264,10 @@ impl UpdatesReceiver {
 
     fn extend_update_queue(
         &mut self,
-        mut updates: Vec<(tl::enums::Update, State)>,
+        updates: Vec<(tl::enums::Update, State)>,
         users: Vec<tl::enums::User>,
         chats: Vec<tl::enums::Chat>,
     ) {
-        if let Some(limit) = self.configuration.update_queue_limit {
-            if let Some(exceeds) = (self.buffer.len() + updates.len()).checked_sub(limit + 1) {
-                let exceeds = exceeds + 1;
-                let now = Instant::now();
-                let notify = match self.last_update_limit_warn {
-                    None => true,
-                    Some(instant) => now - instant > UPDATE_LIMIT_EXCEEDED_LOG_COOLDOWN,
-                };
-
-                updates.truncate(updates.len() - exceeds);
-                if notify {
-                    log::warn!(
-                        "{} updates were dropped because the update_queue_limit was exceeded",
-                        exceeds
-                    );
-                }
-
-                self.last_update_limit_warn = Some(now);
-            }
-        }
-
         self.buffer.push_back((updates, users, chats));
     }
 }

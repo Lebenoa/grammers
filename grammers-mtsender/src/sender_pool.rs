@@ -10,7 +10,7 @@ use std::net::{Ipv4Addr, Ipv6Addr, SocketAddrV4, SocketAddrV6};
 use std::num::NonZeroU32;
 use std::ops::{ControlFlow, Deref};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use std::{fmt, panic};
 
 use grammers_mtproto::{mtp, transport};
@@ -19,7 +19,7 @@ use grammers_session::storages::{ErasedSession, erase};
 use grammers_session::types::DcOption;
 use grammers_session::updates::UpdatesLike;
 use grammers_tl_types::{self as tl, Deserializable, enums};
-use log::info;
+use log::{debug, info, warn};
 use tokio::task::AbortHandle;
 use tokio::{
     sync::{mpsc, oneshot},
@@ -30,6 +30,9 @@ use tokio::{
 use crate::configuration::{ConnectionParams, RetryContext};
 use crate::errors::{InvocationError, ReadError};
 use crate::{Sender, ServerAddr, connect, connect_with_auth};
+
+/// How long to wait after warning the user that the updates was dropped.
+const UPDATES_DROPPED_LOG_COOLDOWN: Duration = Duration::from_secs(300);
 
 pub(crate) type Transport = transport::Full;
 
@@ -102,7 +105,7 @@ pub struct SenderPool {
     ///
     /// Update handling must be processed in a sequential manner,
     /// so this is a separate instance with no way to clone it.
-    pub updates: mpsc::UnboundedReceiver<UpdatesLike>,
+    pub updates: mpsc::Receiver<UpdatesLike>,
 }
 
 /// Manages and runs a pool of zero or more [`Sender`]s.
@@ -113,7 +116,7 @@ pub struct SenderPoolRunner {
     api_id: i32,
     connection_params: ConnectionParams,
     request_rx: mpsc::UnboundedReceiver<Request>,
-    updates_tx: mpsc::UnboundedSender<UpdatesLike>,
+    updates_tx: mpsc::Sender<UpdatesLike>,
     connections: Vec<ConnectionInfo>,
     connection_pool: JoinSet<Result<(), ReadError>>,
 }
@@ -257,7 +260,8 @@ impl SenderPool {
     {
         let session = erase(session);
         let (request_tx, request_rx) = mpsc::unbounded_channel();
-        let (updates_tx, updates_rx) = mpsc::unbounded_channel();
+        let (updates_tx, updates_rx) =
+            mpsc::channel(connection_params.updates_channel_capacity.get());
 
         Self {
             runner: SenderPoolRunner {
@@ -458,7 +462,10 @@ impl SenderPoolRunner {
         Ok(sender)
     }
 
-    async fn update_config(&self, config: tl::types::Config) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    async fn update_config(
+        &self,
+        config: tl::types::Config,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         for option in config
             .dc_options
             .iter()
@@ -510,18 +517,46 @@ impl SenderPoolRunner {
 async fn run_sender(
     mut sender: Sender<Transport, grammers_mtproto::mtp::Encrypted>,
     mut rpc_rx: mpsc::UnboundedReceiver<Rpc>,
-    updates: mpsc::UnboundedSender<UpdatesLike>,
+    updates: mpsc::Sender<UpdatesLike>,
     home_sender: bool,
 ) -> Result<(), ReadError> {
+    let mut dropped: usize = 0;
+    let mut last_update_limit_warn = Instant::now();
+    let mut updates_closed = false;
+
     loop {
         tokio::select! {
             step = sender.step() => match step {
-                Ok(all_new_updates) => all_new_updates.into_iter().for_each(|new_updates| {
-                    let _ = updates.send(new_updates);
-                }),
+                Ok(all_new_updates) => {
+                    if updates_closed {
+                        continue;
+                    }
+                    for new_updates in all_new_updates {
+                        if let Err(e) = updates.try_send(new_updates) {
+                            match e {
+                                mpsc::error::TrySendError::Full(_) => {
+                                    dropped += 1;
+                                    if last_update_limit_warn.elapsed() >= UPDATES_DROPPED_LOG_COOLDOWN {
+                                        warn!(
+                                          "updates channel full (cap {}), dropped {} updates in the last {:?}",
+                                          updates.max_capacity(), dropped, last_update_limit_warn.elapsed()
+                                        );
+                                        dropped = 0;
+                                        last_update_limit_warn = Instant::now();
+                                    }
+                                }
+                                mpsc::error::TrySendError::Closed(_) => {
+                                    debug!("updates channel closed, stopping update forwarding");
+                                    updates_closed = true;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                },
                 Err(err) => {
                     if home_sender {
-                        let _ = updates.send(UpdatesLike::ConnectionClosed);
+                        let _ = updates.try_send(UpdatesLike::ConnectionClosed);
                     }
                     break Err(err)
                 },

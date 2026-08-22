@@ -45,6 +45,7 @@ impl Permissions {
                 manage_direct_messages: true,
                 manage_ranks: true,
                 manage_linked_peers: true,
+                manage_welcome_messages: true,
             },
         }
     }

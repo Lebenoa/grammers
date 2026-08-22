@@ -945,6 +945,7 @@ impl Client {
             video_timestamp: None,
             allow_paid_stars: None,
             suggested_post: None,
+            from_ephemeral: false,
         };
         let result = self.invoke(&request).await?;
         Ok(map_random_ids_to_messages(self, peer.into(), &request.random_id, result).await?)

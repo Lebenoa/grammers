@@ -12,7 +12,7 @@ use grammers_tl_types as tl;
 
 /// Inline button to be used as the reply markup underneath a message.
 pub struct Button {
-    pub raw: tl::enums::KeyboardButton,
+    pub raw: tl::enums::KeyboardInlineButton,
 }
 
 /// Key to be used as the reply markup of an alternate virtual keyboard.
@@ -32,10 +32,13 @@ impl Button {
     /// Both the text and bytes data must be non-empty.
     pub fn data<T: Into<String>, B: Into<Vec<u8>>>(text: T, bytes: B) -> Button {
         Button {
-            raw: tl::types::KeyboardButtonCallback {
+            raw: tl::types::KeyboardInlineButton {
                 text: text.into(),
-                data: bytes.into(),
-                requires_password: false,
+                r#type: tl::types::InlineButtonTypeCallback {
+                    data: bytes.into(),
+                    requires_password: false,
+                }
+                .into(),
                 style: None,
             }
             .into(),
@@ -48,12 +51,15 @@ impl Button {
     /// field.
     pub fn switch<T: Into<String>, Q: Into<String>>(text: T, query: Q) -> Button {
         Button {
-            raw: tl::types::KeyboardButtonSwitchInline {
+            raw: tl::types::KeyboardInlineButton {
                 text: text.into(),
-                query: query.into(),
-                same_peer: true,
+                r#type: tl::types::InlineButtonTypeSwitchInline {
+                    query: query.into(),
+                    same_peer: true,
+                    peer_types: None,
+                }
+                .into(),
                 style: None,
-                peer_types: None,
             }
             .into(),
         }
@@ -65,12 +71,15 @@ impl Button {
     /// insert the bot's username and the specified inline query in the input field.
     pub fn switch_elsewhere<T: Into<String>, Q: Into<String>>(text: T, query: Q) -> Button {
         Button {
-            raw: tl::types::KeyboardButtonSwitchInline {
+            raw: tl::types::KeyboardInlineButton {
                 text: text.into(),
-                query: query.into(),
-                same_peer: false,
+                r#type: tl::types::InlineButtonTypeSwitchInline {
+                    query: query.into(),
+                    same_peer: false,
+                    peer_types: None,
+                }
+                .into(),
                 style: None,
-                peer_types: None,
             }
             .into(),
         }
@@ -82,10 +91,10 @@ impl Button {
     /// domain).
     pub fn url<T: Into<String>, U: Into<String>>(text: T, url: U) -> Button {
         Button {
-            raw: tl::types::KeyboardButtonUrl {
-                style: None,
+            raw: tl::types::KeyboardInlineButton {
                 text: text.into(),
-                url: url.into(),
+                r#type: tl::types::InlineButtonTypeUrl { url: url.into() }.into(),
+                style: None,
             }
             .into(),
         }
@@ -94,10 +103,10 @@ impl Button {
     /// Creates a button that when clicked will open the specified URL in an in-app browser.
     pub fn webview<T: Into<String>, U: Into<String>>(text: T, url: U) -> Button {
         Button {
-            raw: tl::types::KeyboardButtonWebView {
-                style: None,
+            raw: tl::types::KeyboardInlineButton {
                 text: text.into(),
-                url: url.into(),
+                r#type: tl::types::InlineButtonTypeWebView { url: url.into() }.into(),
+                style: None,
             }
             .into(),
         }
@@ -111,8 +120,9 @@ impl Key {
     pub fn text<T: Into<String>>(text: T) -> Key {
         Key {
             raw: tl::types::KeyboardButton {
-                style: None,
                 text: text.into(),
+                r#type: tl::types::ButtonTypeDefault {}.into(),
+                style: None,
             }
             .into(),
         }
@@ -121,9 +131,10 @@ impl Key {
     /// Creates a keyboard key to request the user's contact information (including the phone).
     pub fn request_phone<T: Into<String>>(text: T) -> Key {
         Key {
-            raw: tl::types::KeyboardButtonRequestPhone {
-                style: None,
+            raw: tl::types::KeyboardButton {
                 text: text.into(),
+                r#type: tl::types::ButtonTypeRequestPhone {}.into(),
+                style: None,
             }
             .into(),
         }
@@ -132,9 +143,10 @@ impl Key {
     /// Creates a keyboard key to request the user's current geo-location.
     pub fn request_geo<T: Into<String>>(text: T) -> Key {
         Key {
-            raw: tl::types::KeyboardButtonRequestGeoLocation {
-                style: None,
+            raw: tl::types::KeyboardButton {
                 text: text.into(),
+                r#type: tl::types::ButtonTypeRequestGeoLocation {}.into(),
+                style: None,
             }
             .into(),
         }
@@ -145,10 +157,10 @@ impl Key {
     /// This is only available in direct conversations with the user.
     pub fn request_poll<T: Into<String>>(text: T) -> Key {
         Key {
-            raw: tl::types::KeyboardButtonRequestPoll {
-                style: None,
+            raw: tl::types::KeyboardButton {
                 text: text.into(),
-                quiz: None,
+                r#type: tl::types::ButtonTypeRequestPoll { quiz: None }.into(),
+                style: None,
             }
             .into(),
         }
@@ -159,10 +171,10 @@ impl Key {
     /// This is only available in direct conversations with the user.
     pub fn request_quiz<T: Into<String>>(text: T) -> Key {
         Key {
-            raw: tl::types::KeyboardButtonRequestPoll {
-                style: None,
+            raw: tl::types::KeyboardButton {
                 text: text.into(),
-                quiz: Some(true),
+                r#type: tl::types::ButtonTypeRequestPoll { quiz: Some(true) }.into(),
+                style: None,
             }
             .into(),
         }

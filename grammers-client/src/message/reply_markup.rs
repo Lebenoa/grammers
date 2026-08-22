@@ -30,6 +30,7 @@ const EMPTY_KEYBOARD_MARKUP: tl::types::ReplyKeyboardMarkup = tl::types::ReplyKe
     persistent: false,
     rows: Vec::new(),
     placeholder: None,
+    force_reply: false,
 };
 
 /// Markup to be used as the intended way to reply to the message it is attached to.
@@ -69,12 +70,13 @@ impl ReplyMarkup {
                 rows: buttons
                     .into_iter()
                     .map(|row| {
-                        tl::types::KeyboardButtonRow {
+                        tl::types::KeyboardInlineButtonRow {
                             buttons: row.into_iter().map(|button| button.raw.clone()).collect(),
                         }
                         .into()
                     })
                     .collect(),
+                force_reply: false,
             }),
         }
     }
@@ -83,14 +85,15 @@ impl ReplyMarkup {
     pub fn from_buttons_row(buttons: &[Button]) -> Self {
         Self {
             raw: tl::enums::ReplyMarkup::ReplyInlineMarkup(tl::types::ReplyInlineMarkup {
-                rows: vec![tl::enums::KeyboardButtonRow::Row(
-                    tl::types::KeyboardButtonRow {
+                rows: vec![tl::enums::KeyboardInlineButtonRow::Row(
+                    tl::types::KeyboardInlineButtonRow {
                         buttons: buttons
                             .into_iter()
                             .map(|button| button.raw.clone())
                             .collect(),
                     },
                 )],
+                force_reply: false,
             }),
         }
     }
@@ -102,11 +105,14 @@ impl ReplyMarkup {
                 rows: buttons
                     .into_iter()
                     .map(|button| {
-                        tl::enums::KeyboardButtonRow::Row(tl::types::KeyboardButtonRow {
-                            buttons: vec![button.raw.clone()],
-                        })
+                        tl::enums::KeyboardInlineButtonRow::Row(
+                            tl::types::KeyboardInlineButtonRow {
+                                buttons: vec![button.raw.clone()],
+                            },
+                        )
                     })
                     .collect(),
+                force_reply: false,
             }),
         }
     }

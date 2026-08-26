@@ -377,8 +377,7 @@ impl Session for SqliteSession {
         })
     }
 
-    fn cache_peer(&self, peer: &PeerInfo) -> BoxFuture<'_, Result<(), SqliteSessionError>> {
-        let peer = peer.clone();
+    fn cache_peer(&self, peer: PeerInfo) -> BoxFuture<'_, Result<(), SqliteSessionError>> {
         Box::pin(async move {
             let peer = if let Some(mut existing_peer) = self.peer(peer.id()).await? {
                 existing_peer.extend_info(&peer);
@@ -421,6 +420,68 @@ impl Session for SqliteSession {
             }
             stmt.execute(params).await?;
             Ok(())
+        })
+    }
+
+    fn cache_peers(&self, peers: Vec<PeerInfo>) -> BoxFuture<'_, Result<(), SqliteSessionError>> {
+        Box::pin(async move {
+            let mut result = Ok(());
+            let mut extended_peers = Vec::with_capacity(peers.len());
+            for peer in peers {
+                extended_peers.push(match self.peer(peer.id()).await {
+                    Ok(Some(mut existing_peer)) => {
+                        existing_peer.extend_info(&peer);
+                        existing_peer
+                    }
+                    Ok(None) => peer,
+                    Err(e) => {
+                        result = Err(e);
+                        peer
+                    }
+                });
+            }
+
+            let db = self.database.lock().await;
+            let tx = db.0.transaction().await.unwrap();
+            let stmt = tx
+                .prepare("INSERT OR REPLACE INTO peer_info VALUES (:peer_id, :hash, :subtype)")
+                .await
+                .unwrap();
+            for peer in extended_peers {
+                let subtype = match peer {
+                    PeerInfo::User { bot, is_self, .. } => {
+                        match (bot.unwrap_or_default(), is_self.unwrap_or_default()) {
+                            (true, true) => Some(PeerSubtype::UserSelfBot),
+                            (true, false) => Some(PeerSubtype::UserBot),
+                            (false, true) => Some(PeerSubtype::UserSelf),
+                            (false, false) => None,
+                        }
+                    }
+                    PeerInfo::Chat { .. } => None,
+                    PeerInfo::Channel { kind, .. } => kind.map(|kind| match kind {
+                        ChannelKind::Megagroup => PeerSubtype::Megagroup,
+                        ChannelKind::Broadcast => PeerSubtype::Broadcast,
+                        ChannelKind::Gigagroup => PeerSubtype::Gigagroup,
+                        ChannelKind::Community => PeerSubtype::Community,
+                    }),
+                };
+                let mut params = vec![];
+                let peer_id = peer.id().bot_api_dialog_id_unchecked();
+                params.push((":peer_id".to_owned(), peer_id));
+                let hash = peer.auth().unwrap_or_default().hash();
+                if peer.auth().is_some() {
+                    params.push((":hash".to_owned(), hash));
+                }
+                let subtype = subtype.map(|s| s as i64);
+                if subtype.is_some() {
+                    params.push((":subtype".to_owned(), subtype.unwrap()));
+                }
+                if let Err(err) = stmt.execute(params).await {
+                    result = Err(err.into());
+                }
+            }
+            tx.commit().await?;
+            result
         })
     }
 
@@ -626,7 +687,7 @@ mod tests {
             bot: Some(true),
             is_self: Some(true),
         };
-        session.cache_peer(&peer).await.unwrap();
+        session.cache_peer(peer.clone()).await.unwrap();
         assert_eq!(
             session.peer(PeerId::self_user()).await.unwrap(),
             Some(peer.clone())
@@ -645,7 +706,7 @@ mod tests {
             auth: Some(PeerAuth::from_hash(-1)),
             kind: Some(ChannelKind::Broadcast),
         };
-        session.cache_peer(&peer).await.unwrap();
+        session.cache_peer(peer.clone()).await.unwrap();
         assert_eq!(
             session.peer(PeerId::channel_unchecked(1)).await.unwrap(),
             Some(peer)

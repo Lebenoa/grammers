@@ -915,12 +915,18 @@ impl Client {
             .collect::<HashMap<_, _>>();
 
         if self.0.configuration.auto_cache_peers {
-            for peer in map.values() {
-                if peer.auth().is_some() {
-                    if let Err(e) = self.0.session.cache_peer(&peer.into()).await {
-                        log::warn!("cache_peer fail: {:?}", e)
-                    }
-                }
+            if let Err(e) = self
+                .0
+                .session
+                .cache_peers(
+                    map.values()
+                        .filter(|peer| peer.auth().is_some())
+                        .map(grammers_session::types::PeerInfo::from)
+                        .collect(),
+                )
+                .await
+            {
+                log::warn!("cache_peer fail: {:?}", e)
             }
         }
 

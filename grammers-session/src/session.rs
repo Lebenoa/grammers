@@ -19,7 +19,7 @@ use crate::types::{DcOption, PeerId, PeerInfo, UpdateState, UpdatesState};
 /// A newly-created storage should return the same values that
 /// [crate::SessionData::default] would produce.
 pub trait Session: Send + Sync + 'static {
-    type Error;
+    type Error: Send;
 
     /// Datacenter that is "home" to the user authorized by this session.
     ///
@@ -78,7 +78,20 @@ pub trait Session: Send + Sync + 'static {
     ///
     /// This method may not necessarily remember the peers forever,
     /// except for users where [`PeerInfo::User::is_self`] is `Some(true)`.
-    fn cache_peer(&self, peer: &PeerInfo) -> BoxFuture<'_, Result<(), Self::Error>>;
+    fn cache_peer(&self, peer: PeerInfo) -> BoxFuture<'_, Result<(), Self::Error>>;
+
+    /// Bulk cache_peer, allows optimization in specific implementations
+    fn cache_peers(&self, peers: Vec<PeerInfo>) -> BoxFuture<'_, Result<(), Self::Error>> {
+        Box::pin(async move {
+            let mut result = Ok(());
+            for peer in peers {
+                if let Err(e) = self.cache_peer(peer).await {
+                    result = Err(e);
+                }
+            }
+            result
+        })
+    }
 
     /// Loads the entire updates state.
     fn updates_state(&self) -> BoxFuture<'_, Result<UpdatesState, Self::Error>>;

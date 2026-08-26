@@ -77,11 +77,11 @@ where
         })
     }
 
-    fn cache_peer(&self, peer: &PeerInfo) -> BoxFuture<'_, Result<(), Self::Error>> {
+    fn cache_peer(&self, peer: PeerInfo) -> BoxFuture<'_, Result<(), Self::Error>> {
         let peer = peer.clone();
         Box::pin(async move {
             Arc::clone(&self.0)
-                .cache_peer(&peer)
+                .cache_peer(peer)
                 .await
                 .map_err(|e| e.into())
         })

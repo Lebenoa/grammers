@@ -28,13 +28,9 @@ mod errors;
 mod net;
 mod sender;
 mod sender_pool;
-mod updates_receiver;
 
-pub use configuration::{
-    AutoSleep, ConnectionParams, NoRetries, RetryContext, RetryPolicy, UpdatesConfiguration,
-};
+pub use configuration::ConnectionParams;
 pub use errors::{InvocationError, ReadError, RpcError};
 pub use net::ServerAddr;
 pub use sender::{Sender, connect, connect_with_auth, generate_auth_key};
 pub use sender_pool::{SenderPool, SenderPoolFatHandle, SenderPoolHandle, SenderPoolRunner};
-pub use updates_receiver::UpdatesReceiver;

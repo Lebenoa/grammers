@@ -1,6 +1,5 @@
 [workspace]
 members = [
-    "grammers",
     "grammers-client",
     "grammers-crypto",
     "grammers-mtproto",

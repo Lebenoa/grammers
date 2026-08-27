@@ -313,7 +313,6 @@ pub(super) fn adapt(updates: UpdatesLike) -> Result<tl::types::UpdatesCombined, 
                                     ))
                                 }
                                 tl::enums::InputReplyTo::MonoForum(_) => None,
-                                tl::enums::InputReplyTo::EphemeralMessage(_) => None,
                             })
                             .flatten(),
                         date: update.date,
@@ -409,9 +408,6 @@ pub(super) fn adapt_channel_difference(
                         .expect("channelDifferenceTooLong dialog did not actually contain a pts"),
                     tl::enums::Dialog::Folder(_) => {
                         panic!("received a folder on channelDifferenceTooLong")
-                    }
-                    tl::enums::Dialog::Community(_) => {
-                        panic!("received a community on channelDifferenceTooLong")
                     }
                 },
                 timeout: difference.timeout,

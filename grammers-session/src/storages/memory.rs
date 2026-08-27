@@ -84,7 +84,8 @@ impl Session for MemorySession {
         Box::pin(async move { Ok(self.data()?.peer_infos.get(&peer).cloned()) })
     }
 
-    fn cache_peer(&self, peer: PeerInfo) -> BoxFuture<'_, Result<(), MemorySessionError>> {
+    fn cache_peer(&self, peer: &PeerInfo) -> BoxFuture<'_, Result<(), MemorySessionError>> {
+        let peer = peer.clone();
         Box::pin(async move {
             self.data()?
                 .peer_infos

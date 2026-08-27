@@ -6,13 +6,17 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+use std::num::NonZeroU32;
+use std::ops::ControlFlow;
 use std::sync::Arc;
+use std::time::Duration;
 
 use grammers_mtsender::{InvocationError, SenderPoolFatHandle};
-use grammers_tl_types as tl;
-use tokio::sync::Mutex;
+use grammers_tl_types::{self as tl, Deserializable};
+use log::info;
+use tokio::{sync::Mutex, time::sleep};
 
-use super::{Client, ClientConfiguration, ClientInner};
+use super::{Client, ClientConfiguration, ClientInner, RetryContext};
 
 /// Method implementations directly related with network connectivity.
 impl Client {
@@ -24,7 +28,7 @@ impl Client {
     /// The connection will be initialized with the data from the input configuration.
     ///
     /// The [`grammers_mtsender::SenderPoolHandle`] does not keep a reference to the [`grammers_session::Session`]
-    /// or `api_id`, but the [`grammers_mtsender::SenderPool`] itself does, so the latter is used as input to guarantee
+    /// or `api_id`, but the [`SenderPool`] itself does, so the latter is used as input to guarantee
     /// that the values are correctly shared between the pool and the client handles.
     ///
     /// # Examples
@@ -57,11 +61,11 @@ impl Client {
     ) -> Self {
         // TODO Sender doesn't have a way to handle backpressure yet
         Self(Arc::new(ClientInner {
-            session: sender_pool.session.clone(),
+            session: sender_pool.session,
             api_id: sender_pool.api_id,
-            handle: sender_pool.thin.clone(),
-            auth_copied_to_dcs: Mutex::new(Vec::new()),
+            handle: sender_pool.thin,
             configuration,
+            auth_copied_to_dcs: Mutex::new(Vec::new()),
         }))
     }
 
@@ -93,7 +97,9 @@ impl Client {
         request: &R,
     ) -> Result<R::Return, InvocationError> {
         let dc_id = self.0.session.home_dc_id()?;
-        self.invoke_in_dc(dc_id, request).await
+        self.do_invoke_in_dc(dc_id, request.to_bytes())
+            .await
+            .and_then(|body| R::Return::from_bytes(&body).map_err(|e| e.into()))
     }
 
     /// Like [`Self::invoke`], but in the specified DC.
@@ -110,7 +116,53 @@ impl Client {
         dc_id: i32,
         request: &R,
     ) -> Result<R::Return, InvocationError> {
-        self.0.handle.invoke_in_dc(dc_id, request).await
+        self.do_invoke_in_dc(dc_id, request.to_bytes())
+            .await
+            .and_then(|body| R::Return::from_bytes(&body).map_err(|e| e.into()))
+    }
+
+    async fn do_invoke_in_dc(
+        &self,
+        dc_id: i32,
+        request_body: Vec<u8>,
+    ) -> Result<Vec<u8>, InvocationError> {
+        let mut retry_context = RetryContext {
+            fail_count: NonZeroU32::new(1).unwrap(),
+            slept_so_far: Duration::default(),
+            error: InvocationError::Dropped,
+        };
+
+        loop {
+            match self
+                .0
+                .handle
+                .invoke_in_dc(dc_id, request_body.clone())
+                .await
+            {
+                Ok(response) => break Ok(response),
+                Err(e) => {
+                    retry_context.error = e;
+                    match self
+                        .0
+                        .configuration
+                        .retry_policy
+                        .should_retry(&retry_context)
+                    {
+                        ControlFlow::Continue(delay) => {
+                            info!(
+                                "sleeping on {} for {:?} before retrying",
+                                retry_context.error, delay,
+                            );
+                            sleep(delay).await;
+                            retry_context.fail_count = retry_context.fail_count.saturating_add(1);
+                            retry_context.slept_so_far += delay;
+                            continue;
+                        }
+                        ControlFlow::Break(()) => break Err(retry_context.error),
+                    }
+                }
+            }
+        }
     }
 
     pub(crate) async fn copy_auth_to_dc(&self, target_dc_id: i32) -> Result<(), InvocationError> {

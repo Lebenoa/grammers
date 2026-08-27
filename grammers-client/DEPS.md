@@ -44,7 +44,7 @@ Needed when uploading files to Telegram.
 Used to guess the mime-type of uploaded files when sending media unless the user explicitly sets
 the mime-type themselves. The mime-type is required by Telegram.
 
-## jiff
+## chrono
 
 Used for defining date types (for example, accessing the date of when a message was sent).
 

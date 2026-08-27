@@ -15,7 +15,7 @@ use crate::{Client, peer::PeerMap, utils};
 /// An update that indicates some event, which may be of interest to the logged-in account, has occured.
 ///
 /// Only updates pertaining to messages are guaranteed to be delivered, and can be fetched on-demand if
-/// they occured while the client was offline by enabling [`catch_up`](grammers_mtsender::UpdatesConfiguration::catch_up).
+/// they occured while the client was offline by enabling [`catch_up`](crate::client::UpdatesConfiguration::catch_up).
 #[non_exhaustive]
 #[derive(Debug, Clone)]
 pub enum Update {

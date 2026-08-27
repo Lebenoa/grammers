@@ -8,3 +8,10 @@ testbed.rs
 
 # scraped docs
 *.json
+
+# local omp freebuff scratch
+.freebuff/
+
+# cargo-package scaffolding
+.cargo-ok
+Cargo.toml.orig

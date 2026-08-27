@@ -56,7 +56,7 @@ impl SessionData {
             session.set_dc_option(dc_option).await?;
         }
         for peer in self.peer_infos.values() {
-            session.cache_peer(peer.clone()).await?;
+            session.cache_peer(peer).await?;
         }
         session
             .set_update_state(UpdateState::All(self.updates_state.clone()))

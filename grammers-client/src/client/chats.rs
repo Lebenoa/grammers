@@ -118,9 +118,6 @@ impl ParticipantIter {
                     tl::enums::ChatFull::ChannelFull(_) => panic!(
                         "API returned ChannelFull even though messages::GetFullChat was used"
                     ),
-                    tl::enums::ChatFull::CommunityFull(_) => panic!(
-                        "API returned CommunityFull even though messages::GetFullChat was used"
-                    ),
                 };
 
                 // Don't actually care for the chats, just the users.
@@ -915,18 +912,12 @@ impl Client {
             .collect::<HashMap<_, _>>();
 
         if self.0.configuration.auto_cache_peers {
-            if let Err(e) = self
-                .0
-                .session
-                .cache_peers(
-                    map.values()
-                        .filter(|peer| peer.auth().is_some())
-                        .map(grammers_session::types::PeerInfo::from)
-                        .collect(),
-                )
-                .await
-            {
-                log::warn!("cache_peer fail: {:?}", e)
+            for peer in map.values() {
+                if peer.auth().is_some() {
+                    if let Err(e) = self.0.session.cache_peer(&peer.into()).await {
+                        log::warn!("cache_peer fail: {:?}", e)
+                    }
+                }
             }
         }
 

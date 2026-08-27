@@ -7,32 +7,24 @@
 // except according to those terms.
 
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddrV4, SocketAddrV6};
-use std::num::NonZeroU32;
 use std::ops::{ControlFlow, Deref};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
 use std::{fmt, panic};
 
 use grammers_mtproto::{mtp, transport};
-use grammers_session::Session;
-use grammers_session::storages::{ErasedSession, erase};
-use grammers_session::types::DcOption;
+use grammers_session::types::{DcOption, PeerId, PeerInfo, PeerRef, UpdateState, UpdatesState};
 use grammers_session::updates::UpdatesLike;
-use grammers_tl_types::{self as tl, Deserializable, enums};
-use log::{debug, info, warn};
+use grammers_session::{BoxFuture, ErasedSession, Session};
+use grammers_tl_types::{self as tl, enums};
 use tokio::task::AbortHandle;
 use tokio::{
     sync::{mpsc, oneshot},
     task::JoinSet,
-    time::sleep,
 };
 
-use crate::configuration::{ConnectionParams, RetryContext};
-use crate::errors::{InvocationError, ReadError};
-use crate::{Sender, ServerAddr, connect, connect_with_auth};
-
-/// How long to wait after warning the user that the updates was dropped.
-const UPDATES_DROPPED_LOG_COOLDOWN: Duration = Duration::from_secs(300);
+use crate::configuration::ConnectionParams;
+use crate::errors::ReadError;
+use crate::{InvocationError, Sender, ServerAddr, connect, connect_with_auth};
 
 pub(crate) type Transport = transport::Full;
 
@@ -43,12 +35,6 @@ enum Request {
         dc_id: i32,
         body: Vec<u8>,
         tx: oneshot::Sender<Result<InvokeResponse, InvocationError>>,
-    },
-    CheckRetry {
-        error: InvocationError,
-        fail_count: NonZeroU32,
-        slept_so_far: Duration,
-        tx: oneshot::Sender<ControlFlow<InvocationError, Duration>>,
     },
     Disconnect {
         dc_id: i32,
@@ -105,7 +91,7 @@ pub struct SenderPool {
     ///
     /// Update handling must be processed in a sequential manner,
     /// so this is a separate instance with no way to clone it.
-    pub updates: mpsc::Receiver<UpdatesLike>,
+    pub updates: mpsc::UnboundedReceiver<UpdatesLike>,
 }
 
 /// Manages and runs a pool of zero or more [`Sender`]s.
@@ -116,7 +102,7 @@ pub struct SenderPoolRunner {
     api_id: i32,
     connection_params: ConnectionParams,
     request_rx: mpsc::UnboundedReceiver<Request>,
-    updates_tx: mpsc::Sender<UpdatesLike>,
+    updates_tx: mpsc::UnboundedSender<UpdatesLike>,
     connections: Vec<ConnectionInfo>,
     connection_pool: JoinSet<Result<(), ReadError>>,
 }
@@ -131,20 +117,8 @@ impl Deref for SenderPoolFatHandle {
 
 impl SenderPoolHandle {
     /// Communicate with the running [`SenderPoolRunner`] instance
-    /// to invoke the request in the specified datacenter.
-    pub async fn invoke_in_dc<R: tl::RemoteCall>(
-        &self,
-        dc_id: i32,
-        request: &R,
-    ) -> Result<R::Return, InvocationError> {
-        self.do_invoke_in_dc(dc_id, request.to_bytes())
-            .await
-            .and_then(|body| R::Return::from_bytes(&body).map_err(|e| e.into()))
-    }
-
-    /// Communicate with the running [`SenderPoolRunner`] instance
     /// to invoke the serialized request body in the specified datacenter.
-    pub async fn raw_invoke_in_dc(
+    pub async fn invoke_in_dc(
         &self,
         dc_id: i32,
         body: Vec<u8>,
@@ -171,63 +145,6 @@ impl SenderPoolHandle {
     /// to drop all active connections and gracefully stop running.
     pub fn quit(&self) -> bool {
         self.0.send(Request::Quit).is_ok()
-    }
-
-    /// do [`Self::raw_invoke_in_dc`] with [`Self::check_retry`]
-    pub(crate) async fn do_invoke_in_dc(
-        &self,
-        dc_id: i32,
-        request_body: Vec<u8>,
-    ) -> Result<Vec<u8>, InvocationError> {
-        let mut fail_count = NonZeroU32::new(1).unwrap();
-        let mut slept_so_far = Duration::default();
-
-        loop {
-            match self.raw_invoke_in_dc(dc_id, request_body.clone()).await {
-                Ok(response) => break Ok(response),
-                Err(e) => {
-                    let error_info = format!("{}", e);
-                    match self.check_retry(e, fail_count, slept_so_far).await {
-                        ControlFlow::Continue(delay) => {
-                            info!("sleeping on {} for {:?} before retrying", error_info, delay,);
-                            sleep(delay).await;
-                            fail_count = fail_count.saturating_add(1);
-                            slept_so_far += delay;
-                            continue;
-                        }
-                        ControlFlow::Break(final_error) => break Err(final_error),
-                    }
-                }
-            }
-        }
-    }
-
-    /// Communicate with the running [`SenderPoolRunner`] instance
-    /// to check whether the request needs to retry.
-    async fn check_retry(
-        &self,
-        error: InvocationError,
-        fail_count: NonZeroU32,
-        slept_so_far: Duration,
-    ) -> ControlFlow<InvocationError, Duration> {
-        let (tx, rx) = oneshot::channel();
-        if self
-            .0
-            .send(Request::CheckRetry {
-                error,
-                fail_count,
-                slept_so_far,
-                tx,
-            })
-            .is_err()
-        {
-            return ControlFlow::Break(InvocationError::Dropped);
-        }
-
-        match rx.await {
-            Ok(flow) => flow,
-            Err(_) => ControlFlow::Break(InvocationError::Dropped),
-        }
     }
 }
 
@@ -258,10 +175,9 @@ impl SenderPool {
         S: Session + Sized,
         S::Error: std::error::Error + Send + Sync + 'static,
     {
-        let session = erase(session);
+        let session: Arc<ErasedSession> = Arc::new(Eraser(session));
         let (request_tx, request_rx) = mpsc::unbounded_channel();
-        let (updates_tx, updates_rx) =
-            mpsc::channel(connection_params.updates_channel_capacity.get());
+        let (updates_tx, updates_rx) = mpsc::unbounded_channel();
 
         Self {
             runner: SenderPoolRunner {
@@ -275,7 +191,7 @@ impl SenderPool {
             },
             handle: SenderPoolFatHandle {
                 thin: SenderPoolHandle(request_tx),
-                session: Arc::clone(&session),
+                session,
                 api_id,
             },
             updates: updates_rx,
@@ -336,28 +252,6 @@ impl SenderPoolRunner {
                     },
                 };
                 let _ = connection.rpc_tx.send(Rpc { body, tx });
-                ControlFlow::Continue(())
-            }
-            Request::CheckRetry {
-                error,
-                fail_count,
-                slept_so_far,
-                tx,
-            } => {
-                let retry_context = RetryContext {
-                    fail_count,
-                    slept_so_far,
-                    error,
-                };
-                let flow = match self
-                    .connection_params
-                    .retry_policy
-                    .should_retry(&retry_context)
-                {
-                    ControlFlow::Continue(delay) => ControlFlow::Continue(delay),
-                    ControlFlow::Break(()) => ControlFlow::Break(retry_context.error),
-                };
-                let _ = tx.send(flow);
                 ControlFlow::Continue(())
             }
             Request::Disconnect { dc_id } => {
@@ -462,10 +356,7 @@ impl SenderPoolRunner {
         Ok(sender)
     }
 
-    async fn update_config(
-        &self,
-        config: tl::types::Config,
-    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    async fn update_config(&mut self, config: tl::types::Config) -> Result<(), InvocationError> {
         for option in config
             .dc_options
             .iter()
@@ -508,7 +399,6 @@ impl SenderPoolRunner {
                     )
                 }
             }
-            self.session.set_dc_option(&dc_option).await?;
         }
         Ok(())
     }
@@ -517,46 +407,18 @@ impl SenderPoolRunner {
 async fn run_sender(
     mut sender: Sender<Transport, grammers_mtproto::mtp::Encrypted>,
     mut rpc_rx: mpsc::UnboundedReceiver<Rpc>,
-    updates: mpsc::Sender<UpdatesLike>,
+    updates: mpsc::UnboundedSender<UpdatesLike>,
     home_sender: bool,
 ) -> Result<(), ReadError> {
-    let mut dropped: usize = 0;
-    let mut last_update_limit_warn = Instant::now();
-    let mut updates_closed = false;
-
     loop {
         tokio::select! {
             step = sender.step() => match step {
-                Ok(all_new_updates) => {
-                    if updates_closed {
-                        continue;
-                    }
-                    for new_updates in all_new_updates {
-                        if let Err(e) = updates.try_send(new_updates) {
-                            match e {
-                                mpsc::error::TrySendError::Full(_) => {
-                                    dropped += 1;
-                                    if last_update_limit_warn.elapsed() >= UPDATES_DROPPED_LOG_COOLDOWN {
-                                        warn!(
-                                          "updates channel full (cap {}), dropped {} updates in the last {:?}",
-                                          updates.max_capacity(), dropped, last_update_limit_warn.elapsed()
-                                        );
-                                        dropped = 0;
-                                        last_update_limit_warn = Instant::now();
-                                    }
-                                }
-                                mpsc::error::TrySendError::Closed(_) => {
-                                    debug!("updates channel closed, stopping update forwarding");
-                                    updates_closed = true;
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                },
+                Ok(all_new_updates) => all_new_updates.into_iter().for_each(|new_updates| {
+                    let _ = updates.send(new_updates);
+                }),
                 Err(err) => {
                     if home_sender {
-                        let _ = updates.try_send(UpdatesLike::ConnectionClosed);
+                        let _ = updates.send(UpdatesLike::ConnectionClosed);
                     }
                     break Err(err)
                 },
@@ -584,22 +446,88 @@ impl fmt::Debug for Request {
                 )
                 .field("tx", tx)
                 .finish(),
-            Self::CheckRetry {
-                error,
-                fail_count,
-                slept_so_far,
-                tx,
-            } => f
-                .debug_struct("CheckRetry")
-                .field("error", error)
-                .field("fail_count", fail_count)
-                .field("slept_so_far", slept_so_far)
-                .field("tx", tx)
-                .finish(),
             Self::Disconnect { dc_id } => {
                 f.debug_struct("Disconnect").field("dc_id", dc_id).finish()
             }
             Self::Quit => write!(f, "Quit"),
         }
+    }
+}
+
+struct Eraser<S: Session>(Arc<S>);
+
+impl<S> Session for Eraser<S>
+where
+    S: Session,
+    S::Error: std::error::Error + Send + Sync,
+{
+    type Error = Box<dyn std::error::Error + Send + Sync>;
+
+    fn home_dc_id(&self) -> Result<i32, Self::Error> {
+        Arc::clone(&self.0).home_dc_id().map_err(|e| e.into())
+    }
+
+    fn set_home_dc_id(&self, dc_id: i32) -> BoxFuture<'_, Result<(), Self::Error>> {
+        Box::pin(async move {
+            Arc::clone(&self.0)
+                .set_home_dc_id(dc_id)
+                .await
+                .map_err(|e| e.into())
+        })
+    }
+
+    fn dc_option(&self, dc_id: i32) -> Result<Option<DcOption>, Self::Error> {
+        Arc::clone(&self.0).dc_option(dc_id).map_err(|e| e.into())
+    }
+
+    fn set_dc_option(&self, dc_option: &DcOption) -> BoxFuture<'_, Result<(), Self::Error>> {
+        let dc_option = dc_option.clone();
+        Box::pin(async move {
+            Arc::clone(&self.0)
+                .set_dc_option(&dc_option)
+                .await
+                .map_err(|e| e.into())
+        })
+    }
+
+    fn peer(&self, peer: PeerId) -> BoxFuture<'_, Result<Option<PeerInfo>, Self::Error>> {
+        Box::pin(async move { Arc::clone(&self.0).peer(peer).await.map_err(|e| e.into()) })
+    }
+
+    fn peer_ref(&self, peer: PeerId) -> BoxFuture<'_, Result<Option<PeerRef>, Self::Error>> {
+        Box::pin(async move {
+            Arc::clone(&self.0)
+                .peer_ref(peer)
+                .await
+                .map_err(|e| e.into())
+        })
+    }
+
+    fn cache_peer(&self, peer: &PeerInfo) -> BoxFuture<'_, Result<(), Self::Error>> {
+        let peer = peer.clone();
+        Box::pin(async move {
+            Arc::clone(&self.0)
+                .cache_peer(&peer)
+                .await
+                .map_err(|e| e.into())
+        })
+    }
+
+    fn updates_state(&self) -> BoxFuture<'_, Result<UpdatesState, Self::Error>> {
+        Box::pin(async {
+            Arc::clone(&self.0)
+                .updates_state()
+                .await
+                .map_err(|e| e.into())
+        })
+    }
+
+    fn set_update_state(&self, update: UpdateState) -> BoxFuture<'_, Result<(), Self::Error>> {
+        Box::pin(async {
+            Arc::clone(&self.0)
+                .set_update_state(update)
+                .await
+                .map_err(|e| e.into())
+        })
     }
 }

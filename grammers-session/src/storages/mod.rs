@@ -11,12 +11,10 @@
 //! Some may require certain features to be enabled. If none fit
 //! your needs, you can also implement [`crate::Session`] yourself.
 
-mod erased;
 mod memory;
 #[cfg(feature = "sqlite-storage")]
 mod sqlite;
 
-pub use erased::{ErasedSession, erase};
 pub use memory::MemorySession;
 #[cfg(feature = "sqlite-storage")]
 pub use sqlite::SqliteSession;

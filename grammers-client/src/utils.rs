@@ -10,8 +10,8 @@ use std::sync::atomic::{AtomicI64, Ordering};
 use std::thread;
 use std::time::SystemTime;
 
+use chrono::{DateTime, Utc};
 use grammers_tl_types as tl;
-use jiff::Timestamp;
 
 // This atomic isn't for anything critical, just to generate unique IDs without locks.
 // The worst that can happen if the load and store orderings are wrong is that the IDs
@@ -41,8 +41,8 @@ pub(crate) fn generate_random_ids(n: usize) -> Vec<i64> {
     (0..n).map(|_| generate_random_id()).collect()
 }
 
-pub(crate) fn date(date: i32) -> Timestamp {
-    Timestamp::from_second(date as i64).expect("date out of range")
+pub(crate) fn date(date: i32) -> DateTime<Utc> {
+    DateTime::<Utc>::from_timestamp(date as i64, 0).expect("date out of range")
 }
 
 pub(crate) fn extract_password_parameters(

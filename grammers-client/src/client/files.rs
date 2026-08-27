@@ -39,7 +39,6 @@ pub struct DownloadIter {
     done: bool,
     size: Option<usize>,
     variant: DownloadIterVariant,
-    dc_id: Option<i32>,
 }
 
 enum DownloadIterVariant {
@@ -102,10 +101,7 @@ impl DownloadIter {
         use tl::enums::upload::File;
 
         // TODO handle maybe FILEREF_UPGRADE_NEEDED
-        let mut dc = self
-            .dc_id
-            .map_or_else(|| self.client.0.session.home_dc_id(), Ok)?;
-
+        let mut dc = self.client.0.session.home_dc_id()?;
         loop {
             break match self.client.invoke_in_dc(dc, &request).await {
                 Ok(File::File(f)) => {
@@ -170,7 +166,6 @@ impl Client {
                 done: false,
                 size: Some(data.len()),
                 variant: DownloadIterVariant::PreDownloaded(data),
-                dc_id: downloadable.dc_id(),
             }
         } else if let Some(location) = downloadable.to_raw_input_location() {
             DownloadIter {
@@ -184,7 +179,6 @@ impl Client {
                     offset: 0,
                     limit: MAX_CHUNK_SIZE,
                 }),
-                dc_id: downloadable.dc_id(),
             }
         } else {
             DownloadIter {
@@ -195,7 +189,6 @@ impl Client {
                     io::ErrorKind::Other,
                     "media not downloadable",
                 )),
-                dc_id: downloadable.dc_id(),
             }
         }
     }
@@ -226,12 +219,9 @@ impl Client {
             .to_raw_input_location()
             .zip(downloadable.size())
         {
-            let dc_id = downloadable
-                .dc_id()
-                .map_or_else(|| self.0.session.home_dc_id(), Ok)?;
             if size > BIG_FILE_SIZE {
                 return self
-                    .download_media_concurrent(location, size, path, WORKER_COUNT, dc_id)
+                    .download_media_concurrent(location, size, path, WORKER_COUNT)
                     .await;
             }
         }
@@ -258,7 +248,6 @@ impl Client {
         size: usize,
         path: P,
         workers: usize,
-        dc_id: i32,
     ) -> Result<(), InvocationError> {
         // Allocate
         let mut file = fs::File::create(path).await.map_err(InvocationError::Io)?;
@@ -271,8 +260,9 @@ impl Client {
 
         // Start workers
         let (tx, mut rx) = unbounded_channel();
-        let part_index = Arc::new(std::sync::atomic::AtomicI64::new(0));
+        let part_index = Arc::new(tokio::sync::Mutex::<i64>::new(0));
         let mut tasks = vec![];
+        let home_dc_id = self.0.session.home_dc_id()?;
         for _ in 0..workers {
             let location = location.clone();
             let tx = tx.clone();
@@ -280,7 +270,7 @@ impl Client {
             let client = self.clone();
             let task = tokio::task::spawn(async move {
                 let mut retry_offset = None;
-                let mut task_dc = dc_id;
+                let mut dc = home_dc_id;
                 loop {
                     // Calculate file offset
                     let offset: i64 = {
@@ -288,8 +278,9 @@ impl Client {
                             retry_offset = None;
                             offset
                         } else {
-                            let i = part_index.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                            MAX_CHUNK_SIZE as i64 * i
+                            let mut i = part_index.lock().await;
+                            *i += 1;
+                            MAX_CHUNK_SIZE as i64 * (*i - 1)
                         }
                     };
                     if offset >= size as i64 {
@@ -303,7 +294,7 @@ impl Client {
                         offset,
                         limit: MAX_CHUNK_SIZE,
                     };
-                    match client.invoke_in_dc(task_dc, request).await {
+                    match client.invoke_in_dc(dc, request).await {
                         Ok(tl::enums::upload::File::File(file)) => {
                             tx.send((offset as u64, file.bytes)).unwrap();
                         }
@@ -313,7 +304,7 @@ impl Client {
                             );
                         }
                         Err(InvocationError::Rpc(err)) if &err.name == "AUTH_KEY_UNREGISTERED" => {
-                            match client.copy_auth_to_dc(task_dc).await {
+                            match client.copy_auth_to_dc(dc).await {
                                 Ok(_) => {
                                     retry_offset = Some(offset);
                                     continue;
@@ -323,7 +314,7 @@ impl Client {
                         }
                         Err(InvocationError::Rpc(err)) => {
                             if err.code == FILE_MIGRATE_ERROR {
-                                task_dc = err.value.unwrap() as _;
+                                dc = err.value.unwrap() as _;
                                 retry_offset = Some(offset);
                                 continue;
                             }

@@ -39,7 +39,7 @@ pub mod updates;
 use std::pin::Pin;
 
 pub(crate) use dc_options::{DEFAULT_DC, KNOWN_DC_OPTIONS};
-pub use session::Session;
+pub use session::{ErasedSession, Session};
 pub use session_data::SessionData;
 
 pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;

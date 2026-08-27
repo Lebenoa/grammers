@@ -6,8 +6,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+use chrono::{DateTime, Utc};
 use grammers_tl_types as tl;
-use jiff::Timestamp;
 
 use crate::utils;
 
@@ -44,8 +44,6 @@ impl Permissions {
                 delete_stories: true,
                 manage_direct_messages: true,
                 manage_ranks: true,
-                manage_linked_peers: true,
-                manage_welcome_messages: true,
             },
         }
     }
@@ -148,7 +146,7 @@ impl Restrictions {
         self.raw.pin_messages
     }
 
-    pub fn due(&self) -> Timestamp {
+    pub fn due(&self) -> DateTime<Utc> {
         utils::date(self.raw.until_date)
     }
 }

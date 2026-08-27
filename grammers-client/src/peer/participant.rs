@@ -6,9 +6,9 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+use chrono::{DateTime, Utc};
 use grammers_session::types::PeerId;
 use grammers_tl_types as tl;
-use jiff::Timestamp;
 
 use super::{Peer, PeerMap, Permissions, Restrictions};
 use crate::{peer::User, utils};
@@ -72,7 +72,7 @@ pub struct Participant {
 
 impl Normal {
     /// Date when the participant joined.
-    pub fn date(&self) -> Timestamp {
+    pub fn date(&self) -> DateTime<Utc> {
         utils::date(self.date)
     }
 
@@ -109,7 +109,7 @@ impl Admin {
         self.promoted_by.map(PeerId::user_unchecked)
     }
 
-    pub fn date(&self) -> Timestamp {
+    pub fn date(&self) -> DateTime<Utc> {
         utils::date(self.date)
     }
 
@@ -134,7 +134,7 @@ impl Banned {
         PeerId::user_unchecked(self.kicked_by)
     }
 
-    pub fn date(&self) -> Timestamp {
+    pub fn date(&self) -> DateTime<Utc> {
         utils::date(self.date)
     }
 

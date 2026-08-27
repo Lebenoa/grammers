@@ -14,8 +14,9 @@ use std::sync::Arc;
 use std::{env, time::Duration};
 
 use grammers_client::Client;
+use grammers_client::client::UpdatesConfiguration;
 use grammers_client::update::Update;
-use grammers_mtsender::{SenderPool, UpdatesConfiguration};
+use grammers_mtsender::SenderPool;
 use grammers_session::storages::SqliteSession;
 use simple_logger::SimpleLogger;
 use tokio::task::JoinSet;
@@ -79,7 +80,13 @@ async fn async_main() -> Result {
     // You can use `task::spawn` if you don't care about dropping unfinished handlers midway.
     let mut handler_tasks = JoinSet::new();
     let mut updates = client
-        .stream_updates(updates, UpdatesConfiguration { catch_up: true })
+        .stream_updates(
+            updates,
+            UpdatesConfiguration {
+                catch_up: true,
+                ..Default::default()
+            },
+        )
         .await?;
     loop {
         // Empty finished handlers (you could look at their return value here too.)

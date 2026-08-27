@@ -14,8 +14,13 @@ can fetch from this repository.
 
 ### How this fork differs from upstream
 
-The working tree is the **crates.io `grammers 0.10.0` release** vendored into a
-self-contained workspace, not the upstream `master` branch. Concretely:
+The base is the **crates.io `grammers 0.10.0` release** vendored into a
+self-contained workspace, plus the **parallel-upload extension** that is the
+reason this fork exists. The vendored base keeps the crates.io public API and
+TL layer so it stays drop-in compatible with crates.io consumers (e.g.
+ii-drive's `grammers-client = "0.10"`).
+
+Base — vendored crates.io 0.10.0:
 
 - The eight crates (`grammers-client`, `-crypto`, `-mtproto`, `-mtsender`,
   `-session`, `-tl-gen`, `-tl-parser`, `-tl-types`) are copied from
@@ -28,11 +33,29 @@ self-contained workspace, not the upstream `master` branch. Concretely:
   consumer can redirect its crates.io `grammers-*` deps to this repository.
 - `cargo-package` scaffolding (`.cargo-ok`, `Cargo.toml.orig`) is excluded.
 
-Because the vendored source is the crates.io release, the public API and TL
-layer match what downstream crates.io users get (e.g. ii-drive's
-`grammers-client = "0.10"`). Any changes made specifically for this fork would
-land as commits on top of this vendored base and be described here; there are
-none at the time of writing.
+Fork extension — parallel upload:
+
+- **`Client::upload_stream_parallel`** (`grammers-client`): streams a file with
+  up to 16 concurrent workers (vs upstream's 4) that spread 512 KiB
+  `SaveBigFilePart` requests across a caller-supplied set of
+  [`SenderPoolHandle`]s. Each handle is backed by its own connection to the
+  upload datacenter, so a big-file upload is no longer bound to a single TCP
+  socket — the throughput gap vs the official client that upstream leaves
+  open. Files at or below 10 MiB fall back to the built-in sequential
+  [`Client::upload_stream`].
+- **Shared datacenter + migration handling**: all workers read one shared
+  `AtomicI32` DC id, so a `FILE_MIGRATE`(303) reply switches the whole upload
+  to the new DC once (parts of one `file_id` must land on one DC), capped at
+  `MAX_MIGRATE_RETRIES` = 3 per worker. A target DC with no auth key
+  (`AUTH_KEY_UNREGISTERED`) fails fast with a clear error.
+- **`Client::copy_auth_to_dc` made public** (upstream keeps it `pub(crate)`):
+  lets the app authorize the fork's extra connections to a redirected DC,
+  closing the cross-DC re-upload gap.
+
+The multi-connection sender pools themselves (extra `SenderPool`s opened on
+copied `SqliteSession`s) are provisioned application-side — in ii-drive's
+`TgManager` — and handed to `upload_stream_parallel` as the `pools` slice.
+grammers only exposes the fan-out that consumes them.
 
 ## Current status
 
@@ -128,6 +151,7 @@ dual licensed as above, without any additional terms or conditions.
 [build real projects]: https://codeberg.org/Lonami/grammers/wiki/Real-world-projects
 [Lonami/grammers]: https://codeberg.org/Lonami/grammers
 [ii-drive]: https://github.com/Lebenoa/ii-drive
+[SenderPoolHandle]: https://docs.rs/grammers-mtsender/latest/grammers_mtsender/struct.SenderPoolHandle.html
 [RSS bots]: https://codeberg.org/Lonami/srsrssrsbot
 [client examples]: grammers-client/examples
 [Mobile Transport Protocol]: https://core.telegram.org/mtproto

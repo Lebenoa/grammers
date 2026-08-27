@@ -165,7 +165,10 @@ impl Client {
         }
     }
 
-    pub(crate) async fn copy_auth_to_dc(&self, target_dc_id: i32) -> Result<(), InvocationError> {
+    /// Copies this session's authorization to another datacenter so that
+    /// requests targeting that datacenter (such as a `FILE_MIGRATE`-redirected
+    /// upload or download) are authenticated. Public in this fork.
+    pub async fn copy_auth_to_dc(&self, target_dc_id: i32) -> Result<(), InvocationError> {
         let mut auth_copied_to_dcs = self.0.auth_copied_to_dcs.lock().await;
         if auth_copied_to_dcs.contains(&target_dc_id) {
             return Ok(());

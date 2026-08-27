@@ -8,14 +8,16 @@
 
 use std::mem;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicI32, Ordering};
 #[cfg(feature = "fs")]
 use std::{io::SeekFrom, path::Path};
 
 use futures_util::stream::{FuturesUnordered, StreamExt as _};
-use grammers_mtsender::InvocationError;
+use grammers_mtsender::{InvocationError, SenderPoolHandle};
 use grammers_tl_types as tl;
 use tokio::io::{self, AsyncRead, AsyncReadExt};
 use tokio::sync::Mutex as AsyncMutex;
+use tokio::sync::mpsc;
 #[cfg(feature = "fs")]
 use tokio::{
     fs,
@@ -514,6 +516,184 @@ impl Client {
 
         self.upload_stream(&mut file, size, name).await
     }
+
+    /// Streams a file up to Telegram using multiple sender-pool connections.
+    ///
+    /// Variant of [`Client::upload_stream`] that spreads the 512 KiB part
+    /// requests across a caller-supplied set of [`SenderPoolHandle`]s, so a
+    /// big-file upload is not bound to a single TCP connection to the
+    /// datacenter. This is the parallel-upload extension that distinguishes
+    /// this fork from upstream grammers.
+    ///
+    /// Files at or below 10 MiB fall back to the sequential
+    /// [`Client::upload_stream`]. Larger files use [`UPLOAD_WORKERS`]
+    /// concurrent tasks, each pinned to one pool handle (round-robin), that
+    /// call `SaveBigFilePart` in parallel over their own connection.
+    ///
+    /// `dc_id` is the datacenter the parts are uploaded to; `pools` must not
+    /// be empty and its handles must share the session identity of the
+    /// client so the created `file_id` stays valid for the message posted
+    /// later.
+    ///
+    /// A `FILE_MIGRATE` (303) reply switches the shared datacenter once for
+    /// all workers; a target datacenter the pools have no auth key for fails
+    /// with a clear error rather than silently mis-assembling the file.
+    #[allow(clippy::manual_div_ceil)]
+    pub async fn upload_stream_parallel<S: AsyncRead + Unpin>(
+        &self,
+        stream: &mut S,
+        size: usize,
+        name: String,
+        dc_id: i32,
+        pools: &[SenderPoolHandle],
+    ) -> Result<Uploaded, io::Error> {
+        use grammers_mtsender::InvocationError;
+        use tl::{Deserializable as _, Serializable as _};
+
+        const UPLOAD_WORKERS: usize = 16;
+        const MAX_MIGRATE_RETRIES: u32 = 3;
+
+        if size <= BIG_FILE_SIZE || pools.is_empty() {
+            return self.upload_stream(stream, size, name).await;
+        }
+
+        let file_id = generate_random_id();
+        let name = if name.is_empty() {
+            "a".to_string()
+        } else {
+            name
+        };
+        let total_parts =
+            ((size + MAX_CHUNK_SIZE as usize - 1) / MAX_CHUNK_SIZE as usize) as i32;
+        let current_dc = Arc::new(AtomicI32::new(dc_id));
+
+        let (tx, rx) = mpsc::channel::<(i32, Vec<u8>)>(UPLOAD_WORKERS + 1);
+        let rx = Arc::new(AsyncMutex::new(rx));
+
+        let mut workers = FuturesUnordered::new();
+        for idx in 0..UPLOAD_WORKERS {
+            let pool = pools[idx % pools.len()].clone();
+            let rx = Arc::clone(&rx);
+            let current_dc = Arc::clone(&current_dc);
+            workers.push(tokio::spawn(async move {
+                loop {
+                    let Some((part, bytes)) = rx.lock().await.recv().await else {
+                        break;
+                    };
+                    let body = tl::functions::upload::SaveBigFilePart {
+                        file_id,
+                        file_part: part,
+                        file_total_parts: total_parts,
+                        bytes,
+                    }
+                    .to_bytes();
+                    let mut retries = 0u32;
+                    let resp = loop {
+                        let dc = current_dc.load(Ordering::Relaxed);
+                        match pool.invoke_in_dc(dc, body.clone()).await {
+                            Ok(r) => break r,
+                            Err(InvocationError::Rpc(err)) if err.code == FILE_MIGRATE_ERROR => {
+                                retries += 1;
+                                if retries > MAX_MIGRATE_RETRIES {
+                                    return Err(io::Error::other(format!(
+                                        "upload part {part}: too many FILE_MIGRATE redirects"
+                                    )));
+                                }
+                                let new_dc = err.value.unwrap_or(dc as u32) as i32;
+                                let prev = current_dc.swap(new_dc, Ordering::Relaxed);
+                                if prev != new_dc {
+                                    log::info!(
+                                        "FILE_MIGRATE: switching upload DC for part {part} \
+                                         ({} -> {})",
+                                        prev,
+                                        new_dc
+                                    );
+                                }
+                            }
+                            Err(InvocationError::Rpc(err))
+                                if err.name == "AUTH_KEY_UNREGISTERED" =>
+                            {
+                                return Err(io::Error::other(format!(
+                                    "upload part {part}: target DC {dc} has no auth key \
+                                     (AUTH_KEY_UNREGISTERED). The file may need migration to \
+                                     a DC this session has not authenticated with."
+                                )));
+                            }
+                            Err(e) => {
+                                return Err(io::Error::other(format!(
+                                    "upload part {part} failed: {e}"
+                                )));
+                            }
+                        }
+                    };
+                    let ok = bool::from_bytes(&resp).map_err(|e| {
+                        io::Error::other(format!("upload part {part}: bad response: {e}"))
+                    })?;
+                    if !ok {
+                        return Err(io::Error::other(format!(
+                            "upload part {part}: server rejected the data"
+                        )));
+                    }
+                }
+                Ok::<(), io::Error>(())
+            }));
+        }
+
+        {
+            let mut part = 0i32;
+            let mut buf = vec![0u8; MAX_CHUNK_SIZE as usize];
+            let mut err: Option<io::Error> = None;
+            'outer: loop {
+                let mut filled = 0;
+                while filled < MAX_CHUNK_SIZE as usize {
+                    match stream.read(&mut buf[filled..]).await {
+                        Ok(0) => {
+                            if part == total_parts - 1 {
+                                break;
+                            }
+                            err = Some(io::Error::other(
+                                "stream ended before last part",
+                            ));
+                            break 'outer;
+                        }
+                        Ok(n) => filled += n,
+                        Err(e) => {
+                            err = Some(e);
+                            break 'outer;
+                        }
+                    }
+                }
+                buf.truncate(filled);
+                if tx.send((part, buf)).await.is_err() {
+                    break;
+                }
+                part += 1;
+                if part >= total_parts {
+                    break;
+                }
+                buf = vec![0u8; MAX_CHUNK_SIZE as usize];
+            }
+            drop(tx);
+            if let Some(e) = err {
+                return Err(e);
+            }
+        }
+
+        while let Some(result) = workers.next().await {
+            result
+                .map_err(|e| io::Error::other(format!("upload worker panicked: {e}")))??;
+        }
+
+        Ok(Uploaded::from_raw(
+            tl::types::InputFileBig {
+                id: file_id,
+                parts: total_parts,
+                name,
+            }
+            .into(),
+        ))
+    }
+
 }
 
 struct PartStreamInner<'a, S: AsyncRead + Unpin> {

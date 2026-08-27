@@ -2,6 +2,38 @@
 
 A set of Rust crates to interact with Telegram's API, hence the name *(tele)gramme.rs*.
 
+## Fork notice
+
+This repository is a **fork** of [Lonami/grammers] (the upstream project on
+Codeberg). It is maintained as the grammers source that [ii-drive] builds
+against, so the exact version used locally is also the one CI/other machines
+can fetch from this repository.
+
+- **Upstream:** <https://codeberg.org/Lonami/grammers> (git remote `upstream`)
+- **This fork:** <https://github.com/Lebenoa/grammers> (git remote `origin`)
+
+### How this fork differs from upstream
+
+The working tree is the **crates.io `grammers 0.10.0` release** vendored into a
+self-contained workspace, not the upstream `master` branch. Concretely:
+
+- The eight crates (`grammers-client`, `-crypto`, `-mtproto`, `-mtsender`,
+  `-session`, `-tl-gen`, `-tl-parser`, `-tl-types`) are copied from
+  `crates.io` 0.10.0 (tl-parser 1.2.2) rather than pinned to upstream
+  `master`. Upstream-only members that are not on crates.io — the `grammers`
+  meta-crate and the `assets`/`includes` housekeeping — are dropped.
+- The workspace root `Cargo.toml` wires the crates together with
+  `[patch.crates-io]` pointing each `grammers-*` name at its local directory,
+  so `cargo check --workspace` builds the vendored set as one unit and a
+  consumer can redirect its crates.io `grammers-*` deps to this repository.
+- `cargo-package` scaffolding (`.cargo-ok`, `Cargo.toml.orig`) is excluded.
+
+Because the vendored source is the crates.io release, the public API and TL
+layer match what downstream crates.io users get (e.g. ii-drive's
+`grammers-client = "0.10"`). Any changes made specifically for this fork would
+land as commits on top of this vendored base and be described here; there are
+none at the time of writing.
+
 ## Current status
 
 It works! The high-level interface is slowly taking shape, and it can already be used to [build
@@ -13,7 +45,6 @@ For the API reference, please refer to <https://docs.rs/grammers-client/>.
 
 ## Crates
 
-![Diagram depicting the crate hierarchy](assets/crate-hierarchy.svg)
 
 * **[grammers-client]**: high-level API. Depends on:
   * `grammers-tl-types` to both [invoke requests] and wrap [raw types].
@@ -95,6 +126,8 @@ for inclusion in the work by you, as defined in the Apache-2.0 license, shall be
 dual licensed as above, without any additional terms or conditions.
 
 [build real projects]: https://codeberg.org/Lonami/grammers/wiki/Real-world-projects
+[Lonami/grammers]: https://codeberg.org/Lonami/grammers
+[ii-drive]: https://github.com/Lebenoa/ii-drive
 [RSS bots]: https://codeberg.org/Lonami/srsrssrsbot
 [client examples]: grammers-client/examples
 [Mobile Transport Protocol]: https://core.telegram.org/mtproto
